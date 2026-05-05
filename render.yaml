@@ -3,6 +3,7 @@ services:
     name: botarena-backend
     runtime: node
     plan: free
+    branch: main
     autoDeploy: true
     buildCommand: npm install && npm run build --workspace backend
     startCommand: npm run start --workspace backend
@@ -10,11 +11,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Set these secret values in the Render Dashboard after creating the service.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      # Allows Vercel preview branch URLs like https://project-git-branch-team.vercel.app.
       - key: CORS_ORIGIN_SUFFIXES
         value: vercel.app
