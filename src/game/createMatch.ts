@@ -8,7 +8,8 @@ import {
 import { createMapZones } from "./biomes";
 import { createInitialLoot } from "./loot";
 import { loadPersistentBots, clonePersistentBotForMatch } from "./persistence";
-import { createRng, shuffle } from "./random";
+import { takeQueuedEntrants } from "./queue";
+import { createRng } from "./random";
 import type { Bot, MatchState } from "./types";
 
 export function createMatch(carryOverBotId?: string, carryOverCredits = 0): MatchState {
@@ -17,10 +18,7 @@ export function createMatch(carryOverBotId?: string, carryOverCredits = 0): Matc
   const pool = loadPersistentBots();
   const zones = createMapZones();
   const carryOverBot = carryOverBotId ? pool.find((bot) => bot.id === carryOverBotId) : undefined;
-  const selectedBots = [
-    ...(carryOverBot ? [carryOverBot] : []),
-    ...shuffle(pool.filter((bot) => bot.id !== carryOverBot?.id), rng).slice(0, carryOverBot ? BOT_COUNT - 1 : BOT_COUNT),
-  ];
+  const selectedBots = takeQueuedEntrants(pool, carryOverBotId).entrants;
   const bots: Bot[] = selectedBots.map((persistentBot, index) => {
     const angle = (index / BOT_COUNT) * Math.PI * 2;
     const bot = clonePersistentBotForMatch(
@@ -51,7 +49,7 @@ export function createMatch(carryOverBotId?: string, carryOverCredits = 0): Matc
       {
         id: 1,
         timeMs: 0,
-        message: carryOverBot ? `Match started. ${carryOverBot.name} returns as reigning winner.` : "Match started.",
+        message: carryOverBot ? `Match started. ${carryOverBot.name} returns as reigning winner with ${BOT_COUNT - 1} queued challengers.` : "Match started from the arena queue.",
       },
     ],
     historyEvents: [],

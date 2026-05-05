@@ -103,6 +103,17 @@ export type PersistentBot = {
   affinities: BotAffinities;
   custom?: boolean;
   tacticalInstruction?: string;
+  doctrineSummary?: string;
+  journal?: BotJournalEntry[];
+};
+
+export type BotJournalEntry = {
+  id: string;
+  timestamp: number;
+  matchNumber?: number;
+  title: string;
+  body: string;
+  tone: "origin" | "training" | "match" | "victory" | "setback" | "growth";
 };
 
 export type Weapon = {

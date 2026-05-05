@@ -46,7 +46,7 @@ export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
   }
 
   const nearestEnemy = findNearestEnemy(bot, match);
-  const preferredEnemy = findInfluencedEnemy(bot, match) ?? findPreferredEnemy(bot, match);
+  const preferredEnemy = findInfluencedEnemy(bot, match) ?? findInstructionTarget(bot, match) ?? findPreferredEnemy(bot, match);
   const enemy = preferredEnemy ?? nearestEnemy;
   const nearestLoot = findNearestLoot(bot, match);
   const livingCount = match.bots.filter((candidate) => candidate.alive).length;
@@ -169,9 +169,12 @@ function findNearestCreature(bot: Bot, match: MatchState): Creature | null {
 function shouldFlee(bot: Bot, enemy: Bot, livingCount: number, match: MatchState): boolean {
   const enemyDistance = distance(bot, enemy);
   const relationship = getRelationship(bot, enemy.id);
+  const instruction = bot.tacticalInstruction?.toLowerCase() ?? "";
   const aggressionPressure = getInfluenceStrength(bot, "aggression") + (isSuddenDeathActive(match) ? 0.22 : 0);
   const defensePressure = getInfluenceStrength(bot, "defense");
-  const fleeBias = 1 + defensePressure * 0.5 - aggressionPressure * 0.45;
+  const doctrineDefense = instruction.includes("avoid") || instruction.includes("retreat") || instruction.includes("survive") ? 0.18 : 0;
+  const doctrineAggression = instruction.includes("attack") || instruction.includes("rush") || instruction.includes("aggressive") ? 0.14 : 0;
+  const fleeBias = 1 + defensePressure * 0.5 + doctrineDefense - aggressionPressure * 0.45 - doctrineAggression;
 
   if (shouldForceEndgamePressure(bot, livingCount, match)) {
     return false;
@@ -195,7 +198,37 @@ function shouldFlee(bot: Bot, enemy: Bot, livingCount: number, match: MatchState
   );
 }
 
+function findInstructionTarget(bot: Bot, match: MatchState): Bot | null {
+  const instruction = bot.tacticalInstruction?.toLowerCase() ?? "";
+  if (!instruction) {
+    return null;
+  }
+
+  const enemies = match.bots.filter((candidate) => candidate.alive && candidate.id !== bot.id && !areAllied(bot, candidate, match.elapsedMs));
+  if (enemies.length === 0) {
+    return null;
+  }
+
+  if (instruction.includes("weakened") || instruction.includes("finish") || instruction.includes("hunt")) {
+    return enemies
+      .filter((candidate) => distance(bot, candidate) <= VISIBLE_ENEMY_RANGE * 1.2)
+      .sort((a, b) => a.health - b.health || distance(bot, a) - distance(bot, b))[0] ?? null;
+  }
+
+  if (instruction.includes("revenge") || instruction.includes("grudge")) {
+    return enemies
+      .sort((a, b) => getRelationship(bot, b.id).resentment - getRelationship(bot, a.id).resentment || distance(bot, a) - distance(bot, b))[0] ?? null;
+  }
+
+  return null;
+}
+
 function shouldSeekLoot(bot: Bot, loot: LootItem): boolean {
+  const instruction = bot.tacticalInstruction?.toLowerCase() ?? "";
+  if (instruction.includes("loot") || instruction.includes("scavenge") || instruction.includes("credits")) {
+    return true;
+  }
+
   if (loot.rarity === "legendary" || loot.rarity === "rare") {
     return true;
   }

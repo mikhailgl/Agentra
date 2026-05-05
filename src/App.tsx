@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ThreeArena } from "./components/arena/ThreeArena";
 import { CustomBotCreator } from "./components/CustomBotCreator";
+import { LudusView } from "./components/LudusView";
+import { PostMatchResults, createPostMatchSummary } from "./components/PostMatchResults";
+import type { PostMatchSummary } from "./components/PostMatchResults";
 import { MatchActionDock } from "./components/ui/MatchActionDock";
 import { MatchHighlightOverlay } from "./components/ui/MatchHighlightOverlay";
 import { MatchLogOverlay } from "./components/ui/MatchLogOverlay";
@@ -8,7 +11,8 @@ import { SpectatorOverlay } from "./components/ui/SpectatorOverlay";
 import { getNextMatchNumber, loadBasicMatchResults, saveArenaState, saveBasicMatchResult } from "./game/arenaPersistence";
 import { createMatch } from "./game/createMatch";
 import { awardCredits, BOT_CONTEST_ENTRY_FEE, getPlayerState, placeBet, resolveMatchBets, savePlayerState, spendCredits } from "./game/player";
-import { addCustomPersistentBot, loadPersistentBots, updatePersistentBotsAfterMatch } from "./game/persistence";
+import { addCustomPersistentBot, loadPersistentBots, updatePersistentBotDoctrine, updatePersistentBotsAfterMatch } from "./game/persistence";
+import { enqueueBotForArena, loadArenaQueue } from "./game/queue";
 import { spawnSponsorDrop, stepSimulation } from "./game/simulation";
 import type { ArenaState, BasicMatchResult, BaseStats, BetType, BotAffinities, MatchState, PersistentBot, Psychology } from "./game/types";
 import type { SponsorDropKind } from "./game/simulation";
@@ -60,7 +64,10 @@ function App() {
   const [basicResults, setBasicResults] = useState<BasicMatchResult[]>(() => loadBasicMatchResults());
   const [playerState, setPlayerState] = useState(() => getPlayerState());
   const [persistentBots, setPersistentBots] = useState<PersistentBot[]>(() => loadPersistentBots());
+  const [arenaQueue, setArenaQueue] = useState<PersistentBot[]>(() => loadArenaQueue(loadPersistentBots(), initialMatch.bots.map((bot) => bot.id)));
   const [showCreator, setShowCreator] = useState(false);
+  const [activeView, setActiveView] = useState<"arena" | "ludus">("arena");
+  const [postMatchSummary, setPostMatchSummary] = useState<PostMatchSummary | null>(null);
   const playerStateRef = useRef(playerState);
   const [, forceClockSync] = useState(0);
 
@@ -76,8 +83,8 @@ function App() {
 
   const queuedBots = useMemo(() => {
     const activeBotIds = new Set(matchView.bots.map((bot) => bot.id));
-    return persistentBots.filter((bot) => !activeBotIds.has(bot.id));
-  }, [matchView.bots, persistentBots]);
+    return arenaQueue.filter((bot) => !activeBotIds.has(bot.id));
+  }, [arenaQueue, matchView.bots]);
 
   const syncMatchView = useCallback(() => {
     setMatchView({
@@ -102,14 +109,19 @@ function App() {
   const startMatch = useCallback(
     (matchNumber: number, carryOverBotId?: string, carryOverCredits = 0) => {
       const nextMatch = createMatch(carryOverBotId, carryOverCredits);
+      const nextPool = loadPersistentBots();
       matchRef.current = nextMatch;
       lastFrameAtRef.current = null;
       lastUiSyncAtRef.current = 0;
       setSelectedBotId(null);
       setCameraMode("follow_action");
       setCameraResetToken((token) => token + 1);
+      setPostMatchSummary(null);
+      setActiveView("arena");
       updateArenaState(createRunningArenaState(matchNumber, nextMatch));
       setMatchView(nextMatch);
+      setPersistentBots(nextPool);
+      setArenaQueue(loadArenaQueue(nextPool, nextMatch.bots.map((bot) => bot.id)));
     },
     [updateArenaState],
   );
@@ -125,14 +137,18 @@ function App() {
     }
 
     match.finalized = true;
-    setPersistentBots(updatePersistentBotsAfterMatch(match));
     const winner = match.winnerId ? match.bots.find((bot) => bot.id === match.winnerId) ?? null : null;
-    const resolved = resolveMatchBets(playerStateRef.current, match).state;
+    const resolvedMatch = resolveMatchBets(playerStateRef.current, match);
+    const resolved = resolvedMatch.state;
     const survivorCredits = winner?.custom && winner.carriedCredits > 0 ? winner.carriedCredits : 0;
     const nextPlayer = survivorCredits > 0 ? awardCredits(resolved, survivorCredits) : resolved;
+    const nextPool = updatePersistentBotsAfterMatch(match, arenaStateRef.current.matchNumber);
+    setPersistentBots(nextPool);
+    setArenaQueue(loadArenaQueue(nextPool, match.bots.map((bot) => bot.id)));
     playerStateRef.current = nextPlayer;
     savePlayerState(nextPlayer);
     setPlayerState(nextPlayer);
+    setPostMatchSummary(createPostMatchSummary(arenaStateRef.current.matchNumber, match, resolvedMatch.results, survivorCredits));
 
     setBasicResults(
       saveBasicMatchResult({
@@ -204,9 +220,27 @@ function App() {
 
   const handleCreateCustomBot = useCallback((build: CustomBotBuild, enterContest: boolean) => {
     const [createdBot] = addCustomPersistentBot(build);
-    setPersistentBots(loadPersistentBots());
+    const nextPool = loadPersistentBots();
+    setPersistentBots(nextPool);
     setShowCreator(false);
     if (!createdBot || !enterContest) {
+      setArenaQueue(loadArenaQueue(nextPool, matchRef.current.bots.map((bot) => bot.id)));
+      return;
+    }
+    const chargedPlayer = spendCredits(playerStateRef.current, BOT_CONTEST_ENTRY_FEE);
+    if (!chargedPlayer) {
+      setArenaQueue(loadArenaQueue(nextPool, matchRef.current.bots.map((bot) => bot.id)));
+      return;
+    }
+    playerStateRef.current = chargedPlayer;
+    savePlayerState(chargedPlayer);
+    setPlayerState(chargedPlayer);
+    setArenaQueue(enqueueBotForArena(createdBot.id, nextPool, matchRef.current.bots.map((bot) => bot.id)));
+  }, []);
+
+  const handleEnterBot = useCallback((botId: string) => {
+    const bot = persistentBots.find((candidate) => candidate.id === botId && candidate.custom);
+    if (!bot) {
       return;
     }
     const chargedPlayer = spendCredits(playerStateRef.current, BOT_CONTEST_ENTRY_FEE);
@@ -216,8 +250,14 @@ function App() {
     playerStateRef.current = chargedPlayer;
     savePlayerState(chargedPlayer);
     setPlayerState(chargedPlayer);
-    startMatch(arenaStateRef.current.matchNumber + 1, createdBot.id, BOT_CONTEST_ENTRY_FEE);
-  }, [startMatch]);
+    setArenaQueue(enqueueBotForArena(bot.id, persistentBots, matchRef.current.bots.map((candidate) => candidate.id)));
+  }, [persistentBots]);
+
+  const handleUpdateDoctrine = useCallback((botId: string, instruction: string) => {
+    const nextPool = updatePersistentBotDoctrine(botId, instruction);
+    setPersistentBots(nextPool);
+    setArenaQueue(loadArenaQueue(nextPool, matchRef.current.bots.map((bot) => bot.id)));
+  }, []);
 
   useEffect(() => {
     if (cameraMode !== "follow_bot") return;
@@ -288,10 +328,33 @@ function App() {
     };
   }, [finishMatch, startNextMatch, syncMatchView, updateArenaState]);
 
+  if (activeView === "ludus") {
+    return (
+      <LudusView
+        bots={persistentBots}
+        player={playerState}
+        queuedBotIds={queuedBots.map((bot) => bot.id)}
+        activeBotIds={matchView.bots.map((bot) => bot.id)}
+        onBackToArena={() => setActiveView("arena")}
+        onCreateBot={handleCreateCustomBot}
+        onEnterBot={handleEnterBot}
+        onUpdateDoctrine={handleUpdateDoctrine}
+      />
+    );
+  }
+
   return (
     <main className="app-shell">
       <section className="simulation-area">
         <div className="stage">
+          <nav className="view-switcher" aria-label="Primary views">
+            <button type="button" className="active">
+              Arena
+            </button>
+            <button type="button" className="secondary-button" onClick={() => setActiveView("ludus")}>
+              Bots
+            </button>
+          </nav>
           <ThreeArena
             arena={arenaView}
             cameraMode={cameraMode}
@@ -314,7 +377,15 @@ function App() {
             onResetCamera={resetCamera}
             onStartNextNow={startNextMatch}
             narrativeMoments={matchView.narrativeMoments}
+            showIntermissionCard={!postMatchSummary}
           />
+          {arenaState.phase === "intermission" && postMatchSummary && (
+            <PostMatchResults
+              summary={postMatchSummary}
+              countdownSeconds={arenaState.intermissionEndsAt ? Math.max(0, Math.ceil((arenaState.intermissionEndsAt - Date.now()) / 1000)) : 0}
+              onStartNextNow={startNextMatch}
+            />
+          )}
           <MatchActionDock
             player={playerState}
             bots={matchView.bots}

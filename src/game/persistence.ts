@@ -3,9 +3,10 @@ import { BIOMES, getBiomeName } from "./biomes";
 import { applyMatchProgression } from "./progression";
 import { createRng, pickOne } from "./random";
 import { applyTraitPsychology } from "./traits";
-import type { BaseStats, Bot, BotAffinities, CareerStats, MatchState, PersistentBot, Psychology, Relationship } from "./types";
+import type { BaseStats, Bot, BotAffinities, BotJournalEntry, CareerStats, MatchState, PersistentBot, Psychology, Relationship } from "./types";
 
 const STORAGE_KEY = "ai-battle:persistent-bots:v1";
+const MAX_JOURNAL_ENTRIES = 24;
 
 export function loadPersistentBots(): PersistentBot[] {
   if (typeof window === "undefined") {
@@ -40,7 +41,7 @@ export function savePersistentBots(pool: PersistentBot[]): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(pool));
 }
 
-export function updatePersistentBotsAfterMatch(match: MatchState): PersistentBot[] {
+export function updatePersistentBotsAfterMatch(match: MatchState, matchNumber?: number): PersistentBot[] {
   const pool = loadPersistentBots();
   const placements = getPlacements(match.bots);
 
@@ -51,13 +52,15 @@ export function updatePersistentBotsAfterMatch(match: MatchState): PersistentBot
     }
 
     persistent.relationships = matchBot.relationships;
-    applyMatchProgression(
+    const previousLevel = persistent.level;
+    const progressionResult = applyMatchProgression(
       persistent,
       matchBot,
       placements.get(matchBot.id) ?? match.bots.length,
       match.bots.length,
       match.winnerId === matchBot.id,
     );
+    persistent.journal = addJournalEntry(persistent.journal, createMatchJournalEntry(persistent, matchBot, progressionResult, placements.get(matchBot.id) ?? match.bots.length, match.bots.length, matchNumber, previousLevel));
     matchBot.level = persistent.level;
     matchBot.xp = persistent.xp;
     matchBot.baseStats = { ...persistent.baseStats };
@@ -132,8 +135,47 @@ export function addCustomPersistentBot(input: {
     affinities: normalizeAffinities(input.affinities),
     custom: true,
     tacticalInstruction: input.tacticalInstruction.trim().slice(0, 140),
+    doctrineSummary: summarizeDoctrine(input.tacticalInstruction),
+    journal: [
+      {
+        id: `journal-${Date.now()}-origin`,
+        timestamp: Date.now(),
+        title: "Released into the ludus",
+        body: `${input.name.trim().slice(0, 24) || "Custom Bot"} was created with a ${summarizeDoctrine(input.tacticalInstruction).toLowerCase()} doctrine.`,
+        tone: "origin",
+      },
+    ],
   };
   const nextPool = [bot, ...pool];
+  savePersistentBots(nextPool);
+  return nextPool;
+}
+
+export function updatePersistentBotDoctrine(botId: string, instruction: string): PersistentBot[] {
+  const pool = loadPersistentBots();
+  const trimmed = instruction.trim().slice(0, 180);
+  const nextPool = pool.map((bot) => {
+    if (bot.id !== botId) {
+      return bot;
+    }
+
+    return {
+      ...bot,
+      tacticalInstruction: trimmed,
+      doctrineSummary: summarizeDoctrine(trimmed),
+      psychology: applyDoctrinePsychology(bot.psychology, trimmed),
+      affinities: applyDoctrineAffinities(bot.affinities, trimmed),
+      journal: addJournalEntry(bot.journal, {
+        id: `journal-${Date.now()}-training`,
+        timestamp: Date.now(),
+        title: "Doctrine updated",
+        body: trimmed
+          ? `New private instruction: "${trimmed}". Current read: ${summarizeDoctrine(trimmed)}.`
+          : "Doctrine cleared. This fighter will lean on its native instincts again.",
+        tone: "training",
+      }),
+    };
+  });
   savePersistentBots(nextPool);
   return nextPool;
 }
@@ -160,6 +202,16 @@ function createDefaultPool(): PersistentBot[] {
       relationships: {},
       recentResults: [],
       affinities: normalizeAffinities(),
+      doctrineSummary: summarizeDoctrine(""),
+      journal: [
+        {
+          id: `journal-${index + 1}-origin`,
+          timestamp: Date.now(),
+          title: "Entered the public pool",
+          body: `${BOT_NAMES[index] ?? `Bot ${index + 1}`} joined the arena circuit looking for a first reputation-making win.`,
+          tone: "origin",
+        },
+      ],
     };
   });
 }
@@ -179,7 +231,25 @@ function normalizePersistentBot(bot: PersistentBot): PersistentBot {
     affinities: normalizeAffinities(bot.affinities),
     custom: bot.custom ?? false,
     tacticalInstruction: bot.tacticalInstruction,
+    doctrineSummary: bot.doctrineSummary ?? summarizeDoctrine(bot.tacticalInstruction ?? ""),
+    journal: normalizeJournal(bot.journal, bot),
   };
+}
+
+export function summarizeDoctrine(instruction: string): string {
+  const lower = instruction.toLowerCase();
+  const priorities: string[] = [];
+
+  if (lower.includes("ambush") || lower.includes("hide") || lower.includes("stealth")) priorities.push("ambush-first");
+  if (lower.includes("avoid") || lower.includes("retreat") || lower.includes("survive")) priorities.push("survival-biased");
+  if (lower.includes("loot") || lower.includes("scavenge") || lower.includes("credits")) priorities.push("loot-aware");
+  if (lower.includes("weakened") || lower.includes("finish") || lower.includes("hunt")) priorities.push("hunts wounded targets");
+  if (lower.includes("revenge") || lower.includes("betray")) priorities.push("grudge-driven");
+  if (lower.includes("aggressive") || lower.includes("attack") || lower.includes("rush")) priorities.push("high-pressure");
+  if (lower.includes("ranged") || lower.includes("bow") || lower.includes("rifle")) priorities.push("range-preferring");
+  if (lower.includes("melee") || lower.includes("close")) priorities.push("close-range");
+
+  return priorities.length > 0 ? priorities.slice(0, 3).join(" / ") : "autonomous instincts";
 }
 
 export function normalizeAffinities(affinities?: Partial<BotAffinities>): BotAffinities {
@@ -238,6 +308,112 @@ function updateAffinitiesAfterMatch(persistent: PersistentBot, matchBot: Bot, pl
 
   persistent.affinities = next;
   return cloneAffinities(next);
+}
+
+function createMatchJournalEntry(
+  persistent: PersistentBot,
+  matchBot: Bot,
+  progressionResult: string,
+  placement: number,
+  totalBots: number,
+  matchNumber: number | undefined,
+  previousLevel: number,
+): BotJournalEntry {
+  const leveled = persistent.level > previousLevel;
+  const won = placement === 1 && matchBot.alive;
+  const extracted = matchBot.carriedCredits > 0;
+  const title = won ? `Won match #${matchNumber ?? "?"}` : `Placed #${placement} of ${totalBots}`;
+  const bodyParts = [
+    progressionResult,
+    `${matchBot.kills} kills`,
+    `${Math.round(matchBot.damageDealt)} damage`,
+    `${Math.round(matchBot.survivalTimeMs / 1000)}s survived`,
+  ];
+
+  if (extracted) {
+    bodyParts.push(`extracted ${matchBot.carriedCredits} credits`);
+  }
+  if (leveled) {
+    bodyParts.push(`reached level ${persistent.level}`);
+  }
+
+  return {
+    id: `journal-${Date.now()}-${persistent.id}-${matchNumber ?? "match"}`,
+    timestamp: Date.now(),
+    matchNumber,
+    title,
+    body: bodyParts.join(" / "),
+    tone: won ? "victory" : leveled ? "growth" : placement > Math.ceil(totalBots * 0.7) ? "setback" : "match",
+  };
+}
+
+function addJournalEntry(entries: BotJournalEntry[] | undefined, entry: BotJournalEntry): BotJournalEntry[] {
+  return [entry, ...(entries ?? [])].slice(0, MAX_JOURNAL_ENTRIES);
+}
+
+function normalizeJournal(entries: BotJournalEntry[] | undefined, bot: PersistentBot): BotJournalEntry[] {
+  if (Array.isArray(entries) && entries.length > 0) {
+    return entries
+      .filter((entry) => typeof entry?.id === "string" && typeof entry.title === "string" && typeof entry.body === "string")
+      .map((entry) => ({
+        id: entry.id,
+        timestamp: Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now(),
+        matchNumber: Number.isFinite(entry.matchNumber) ? entry.matchNumber : undefined,
+        title: entry.title.slice(0, 80),
+        body: entry.body.slice(0, 260),
+        tone: ["origin", "training", "match", "victory", "setback", "growth"].includes(entry.tone) ? entry.tone : "match",
+      }))
+      .slice(0, MAX_JOURNAL_ENTRIES);
+  }
+
+  return [
+    {
+      id: `journal-${bot.id}-origin`,
+      timestamp: Date.now(),
+      title: bot.custom ? "Released into the ludus" : "Entered the public pool",
+      body: `${bot.name} is waiting for a defining arena performance.`,
+      tone: "origin",
+    },
+  ];
+}
+
+function applyDoctrinePsychology(psychology: Psychology, instruction: string): Psychology {
+  const lower = instruction.toLowerCase();
+  const next = { ...psychology };
+
+  if (lower.includes("aggressive") || lower.includes("attack") || lower.includes("rush")) next.aggression += 0.06;
+  if (lower.includes("avoid") || lower.includes("retreat") || lower.includes("survive")) next.selfPreservation += 0.07;
+  if (lower.includes("loot") || lower.includes("scavenge") || lower.includes("credits")) next.opportunism += 0.06;
+  if (lower.includes("ambush") || lower.includes("hide") || lower.includes("stealth")) next.riskTolerance -= 0.04;
+  if (lower.includes("revenge") || lower.includes("grudge")) next.vengefulness += 0.07;
+  if (lower.includes("ally") || lower.includes("team") || lower.includes("loyal")) next.loyalty += 0.06;
+  if (lower.includes("win") || lower.includes("hunt") || lower.includes("finish")) next.ambition += 0.05;
+
+  return clampPsychology(next);
+}
+
+function applyDoctrineAffinities(affinities: BotAffinities, instruction: string): BotAffinities {
+  const lower = instruction.toLowerCase();
+  const next = cloneAffinities(affinities);
+
+  if (lower.includes("bow") || lower.includes("ranged")) {
+    next.weapons.Bow = clampAffinity(next.weapons.Bow + 0.05);
+    next.combatRanges.long = clampAffinity(next.combatRanges.long + 0.05);
+  }
+  if (lower.includes("melee") || lower.includes("close")) {
+    next.weapons.Knife = clampAffinity(next.weapons.Knife + 0.04);
+    next.weapons.Axe = clampAffinity(next.weapons.Axe + 0.04);
+    next.combatRanges.close = clampAffinity(next.combatRanges.close + 0.05);
+  }
+  if (lower.includes("forest")) next.biomes.forest = clampAffinity((next.biomes.forest ?? 1) + 0.04);
+  if (lower.includes("high ground")) next.biomes.high_ground = clampAffinity((next.biomes.high_ground ?? 1) + 0.04);
+  if (lower.includes("swamp")) next.biomes.swamp = clampAffinity((next.biomes.swamp ?? 1) + 0.04);
+
+  return next;
+}
+
+function clampPsychology(psychology: Psychology): Psychology {
+  return Object.fromEntries(Object.entries(psychology).map(([key, value]) => [key, Math.max(0, Math.min(1, value))])) as Psychology;
 }
 
 function cloneAffinities(affinities: BotAffinities): BotAffinities {

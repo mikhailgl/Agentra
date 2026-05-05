@@ -696,6 +696,7 @@ textarea {
 
 .arena-top-left,
 .arena-top-right,
+.view-switcher,
 .match-log-overlay,
 .match-action-dock,
 .match-highlight,
@@ -703,9 +704,32 @@ textarea {
 .spectator-top,
 .current-bot-list,
 .selected-bot-dock,
-.intermission-overlay {
+.intermission-overlay,
+.post-match-overlay {
   position: absolute;
   z-index: 4;
+}
+
+.view-switcher {
+  display: flex;
+  gap: 0.4rem;
+  left: 50%;
+  top: 1rem;
+  transform: translateX(-50%);
+  z-index: 8;
+}
+
+.view-switcher button {
+  background: rgba(12, 18, 15, 0.78);
+  backdrop-filter: blur(14px);
+  color: #edf4ee;
+  min-height: 34px;
+  padding: 0.5rem 0.85rem;
+}
+
+.view-switcher button.active {
+  background: #f2c453;
+  color: #16140d;
 }
 
 .spectator-top {
@@ -740,7 +764,8 @@ textarea {
 .match-action-dock,
 .selected-bot-overlay,
 .selected-bot-details,
-.intermission-overlay {
+.intermission-overlay,
+.post-match-overlay {
   background: rgba(12, 18, 15, 0.78);
   backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1361,12 +1386,388 @@ textarea {
   color: #dbe5df;
 }
 
+.post-match-overlay {
+  display: grid;
+  gap: 0.9rem;
+  left: 50%;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1rem;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100% - 2rem));
+  z-index: 9;
+}
+
+.post-match-header {
+  align-items: center;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.post-match-header span,
+.post-match-metrics span,
+.post-match-overlay h3 {
+  color: #f2c453;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.post-match-header h2 {
+  font-size: clamp(1.7rem, 4vw, 3rem);
+  line-height: 0.98;
+  margin-top: 0.12rem;
+}
+
+.post-match-header p,
+.post-match-metrics small,
+.placements-panel small,
+.your-fighters-panel span,
+.bet-results-panel span {
+  color: #b8c4bc;
+  font-size: 0.8rem;
+}
+
+.post-match-metrics,
+.career-metrics {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.post-match-metrics article,
+.career-metric {
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.75rem;
+}
+
+.post-match-metrics strong,
+.career-metric strong {
+  font-size: 1.35rem;
+}
+
+.your-fighters-panel,
+.placements-panel,
+.bet-results-panel {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.your-fighters-panel article,
+.placements-list article,
+.bet-results-panel article,
+.journal-entry {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.placements-list {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.placements-list article.owned,
+.bet-results-panel article.won,
+.journal-entry.victory {
+  border-color: rgba(242, 196, 83, 0.42);
+  box-shadow: inset 3px 0 0 rgba(242, 196, 83, 0.82);
+}
+
+.bet-results-panel article.lost,
+.journal-entry.setback {
+  border-color: rgba(248, 113, 113, 0.34);
+}
+
+.ludus-shell {
+  min-height: 100vh;
+  overflow: hidden;
+  padding: clamp(1rem, 2vw, 1.6rem);
+  position: relative;
+}
+
+.ludus-shell::before {
+  background:
+    radial-gradient(circle at 15% 15%, rgba(242, 196, 83, 0.16), transparent 28rem),
+    radial-gradient(circle at 82% 8%, rgba(56, 189, 248, 0.13), transparent 24rem),
+    linear-gradient(135deg, #0a0e0c 0%, #172018 48%, #101412 100%);
+  content: "";
+  inset: 0;
+  position: fixed;
+  z-index: -1;
+}
+
+.ludus-hero,
+.ludus-layout,
+.ludus-profile,
+.ludus-roster,
+.ludus-card,
+.bot-profile-hero {
+  min-width: 0;
+}
+
+.ludus-hero {
+  align-items: end;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0 auto 1rem;
+  max-width: 1280px;
+}
+
+.ludus-hero span,
+.bot-profile-hero span,
+.credit-tile span,
+.roster-heading span,
+.career-metric span,
+.ludus-stat-line span,
+.psychology-grid span,
+.doctrine-summary span {
+  color: #9ea9a1;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ludus-hero h1 {
+  font-size: clamp(2rem, 5vw, 4.5rem);
+  letter-spacing: -0.06em;
+  line-height: 0.9;
+  max-width: 820px;
+}
+
+.ludus-hero p,
+.ludus-card p,
+.doctrine-card p {
+  color: #b8c4bc;
+  line-height: 1.45;
+}
+
+.ludus-hero-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.55rem;
+}
+
+.credit-tile {
+  background: rgba(242, 196, 83, 0.1);
+  border: 1px solid rgba(242, 196, 83, 0.28);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.58rem 0.72rem;
+}
+
+.credit-tile strong {
+  color: #f2c453;
+}
+
+.ludus-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  margin: 0 auto;
+  max-width: 1280px;
+}
+
+.ludus-roster,
+.ludus-profile,
+.ludus-card {
+  background: rgba(12, 18, 15, 0.78);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 14px;
+}
+
+.ludus-roster {
+  align-content: start;
+  display: grid;
+  gap: 1rem;
+  max-height: calc(100vh - 9rem);
+  overflow: auto;
+  padding: 0.9rem;
+}
+
+.roster-section,
+.ludus-roster-list,
+.ludus-profile,
+.ludus-card,
+.doctrine-card {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.roster-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ludus-roster-card {
+  background: rgba(255, 255, 255, 0.045);
+  color: #edf4ee;
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.7rem;
+  text-align: left;
+  width: 100%;
+}
+
+.ludus-roster-card.selected {
+  border-color: rgba(242, 196, 83, 0.58);
+  box-shadow: inset 3px 0 0 #f2c453;
+}
+
+.ludus-roster-card span,
+.ludus-roster-card small,
+.preference-list span {
+  color: #b8c4bc;
+  font-size: 0.78rem;
+}
+
+.ludus-profile {
+  padding: 1rem;
+}
+
+.bot-profile-hero {
+  align-items: center;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.bot-sigil {
+  align-items: center;
+  background: linear-gradient(135deg, #f2c453, #a16207);
+  border-radius: 18px;
+  color: #171107;
+  display: grid;
+  font-size: 2.2rem;
+  font-weight: 1000;
+  height: 74px;
+  place-items: center;
+  width: 74px;
+}
+
+.bot-profile-hero h2 {
+  font-size: clamp(1.6rem, 4vw, 3rem);
+  letter-spacing: -0.04em;
+}
+
+.ludus-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ludus-tabs button.active {
+  background: #38bdf8;
+  color: #08111a;
+}
+
+.ludus-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ludus-card {
+  padding: 0.9rem;
+}
+
+.ludus-card h3 {
+  margin: 0;
+}
+
+.ludus-stat-line {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.ludus-stat-line div,
+.journal-entry div {
+  align-items: center;
+  display: flex;
+  gap: 0.7rem;
+  justify-content: space-between;
+}
+
+.ludus-stat-line meter {
+  width: 100%;
+}
+
+.psychology-grid {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.psychology-grid div {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.45rem 0.55rem;
+}
+
+.preference-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.journal-card {
+  max-height: 58vh;
+  overflow: auto;
+}
+
+.journal-entry.training,
+.journal-entry.growth {
+  border-color: rgba(56, 189, 248, 0.34);
+}
+
+.journal-entry time {
+  color: #9ea9a1;
+  font-size: 0.72rem;
+}
+
+.doctrine-card textarea {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #edf4ee;
+  font: inherit;
+  min-height: 140px;
+  padding: 0.8rem;
+  resize: vertical;
+}
+
+.doctrine-summary {
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.75rem;
+}
+
 .spectator-top,
 .current-bot-list,
 .match-action-dock,
 .selected-bot-overlay,
 .selected-bot-details,
-.intermission-overlay {
+.intermission-overlay,
+.post-match-overlay {
   pointer-events: auto;
 }
 
@@ -2027,6 +2428,25 @@ button:disabled {
   .sponsor-overlay {
     display: none;
   }
+
+  .ludus-hero,
+  .ludus-layout,
+  .ludus-grid,
+  .post-match-metrics,
+  .placements-list {
+    grid-template-columns: 1fr;
+  }
+
+  .ludus-hero-actions,
+  .bot-profile-hero,
+  .post-match-header {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .ludus-roster {
+    max-height: none;
+  }
 }
 
 @media (max-width: 560px) {
@@ -2071,6 +2491,13 @@ button:disabled {
     width: calc(100% - 1.5rem);
   }
 
+  .view-switcher {
+    left: auto;
+    right: 0.75rem;
+    top: 0.75rem;
+    transform: none;
+  }
+
   .bot-inspector {
     bottom: 0.75rem;
     left: 0.75rem;
@@ -2086,5 +2513,21 @@ button:disabled {
   .modal-backdrop {
     align-items: flex-start;
     overflow: auto;
+  }
+
+  .post-match-overlay {
+    align-content: start;
+    height: calc(100vh - 1.5rem);
+    max-height: none;
+    top: 0.75rem;
+    transform: translateX(-50%);
+  }
+
+  .ludus-shell {
+    padding: 0.75rem;
+  }
+
+  .ludus-hero-actions {
+    display: grid;
   }
 }

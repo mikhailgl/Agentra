@@ -21,6 +21,7 @@ export function SpectatorOverlay({
   onResetCamera,
   onStartNextNow,
   narrativeMoments,
+  showIntermissionCard = true,
 }: {
   arenaState: ArenaState;
   bots: Bot[];
@@ -30,6 +31,7 @@ export function SpectatorOverlay({
   results: BasicMatchResult[];
   cameraMode: CameraMode;
   narrativeMoments: NarrativeMoment[];
+  showIntermissionCard?: boolean;
   onSelectBot: (botId: string) => void;
   onCameraModeChange: (mode: CameraMode) => void;
   onTogglePause: () => void;
@@ -184,7 +186,7 @@ export function SpectatorOverlay({
         </button>
       </section>
 
-      {arenaState.phase === "intermission" && (
+      {showIntermissionCard && arenaState.phase === "intermission" && (
         <section className="intermission-overlay">
           <span>Intermission</span>
           <h2>{winner ? `${winner.name} wins match #${arenaState.matchNumber}` : `Match #${arenaState.matchNumber} ended`}</h2>
