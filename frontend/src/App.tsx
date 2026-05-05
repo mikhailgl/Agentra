@@ -8,11 +8,12 @@ import { MatchActionDock } from "./components/ui/MatchActionDock";
 import { MatchHighlightOverlay } from "./components/ui/MatchHighlightOverlay";
 import { MatchLogOverlay } from "./components/ui/MatchLogOverlay";
 import { SpectatorOverlay } from "./components/ui/SpectatorOverlay";
-import { getNextMatchNumber, loadBasicMatchResults, saveArenaState, saveBasicMatchResult } from "./game/arenaPersistence";
+import { getNextMatchNumber, loadBasicMatchResults, replaceBasicMatchResults, saveArenaState, saveBasicMatchResult } from "./game/arenaPersistence";
 import { createMatch } from "./game/createMatch";
 import { awardCredits, BOT_CONTEST_ENTRY_FEE, getPlayerState, placeBet, resolveMatchBets, savePlayerState, spendCredits } from "./game/player";
-import { addCustomPersistentBot, loadPersistentBots, updatePersistentBotDoctrine, updatePersistentBotsAfterMatch } from "./game/persistence";
-import { enqueueBotForArena, loadArenaQueue } from "./game/queue";
+import { addCustomPersistentBot, loadPersistentBots, savePersistentBots, updatePersistentBotDoctrine, updatePersistentBotsAfterMatch } from "./game/persistence";
+import { enableRemoteGameStateSync, loadRemoteGameState, saveRemoteGameState } from "./game/remotePersistence";
+import { enqueueBotForArena, loadArenaQueue, replaceArenaQueueIds } from "./game/queue";
 import { spawnSponsorDrop, stepSimulation } from "./game/simulation";
 import type { ArenaState, BasicMatchResult, BaseStats, BetType, BotAffinities, MatchState, PersistentBot, Psychology } from "./game/types";
 import type { SponsorDropKind } from "./game/simulation";
@@ -273,6 +274,68 @@ function App() {
 
   useEffect(() => {
     saveArenaState(arenaStateRef.current);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadRemoteGameState()
+      .then((remoteState) => {
+        if (cancelled || !remoteState) {
+          return;
+        }
+
+        const hasRemoteState = Boolean(
+          remoteState.persistentBots?.length ||
+            remoteState.playerState ||
+            remoteState.arenaState ||
+            remoteState.arenaQueueIds?.length ||
+            remoteState.basicResults?.length,
+        );
+
+        if (!hasRemoteState) {
+          enableRemoteGameStateSync();
+          saveRemoteGameState({
+            persistentBots,
+            playerState,
+            arenaState,
+            arenaQueueIds: arenaQueue.map((bot) => bot.id),
+            basicResults,
+          });
+          return;
+        }
+
+        const nextPool = remoteState.persistentBots?.length ? remoteState.persistentBots : persistentBots;
+        if (remoteState.persistentBots?.length) {
+          savePersistentBots(nextPool);
+          setPersistentBots(nextPool);
+        }
+
+        if (remoteState.playerState) {
+          playerStateRef.current = remoteState.playerState;
+          savePlayerState(remoteState.playerState);
+          setPlayerState(remoteState.playerState);
+        }
+
+        if (remoteState.basicResults?.length) {
+          setBasicResults(replaceBasicMatchResults(remoteState.basicResults));
+        }
+
+        if (remoteState.arenaQueueIds?.length) {
+          replaceArenaQueueIds(remoteState.arenaQueueIds);
+        }
+
+        setArenaQueue(loadArenaQueue(nextPool, matchRef.current.bots.map((bot) => bot.id)));
+        enableRemoteGameStateSync();
+      })
+      .catch((error) => {
+        enableRemoteGameStateSync();
+        console.warn("Remote game state hydration failed", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

@@ -2,6 +2,7 @@ import { BOT_NAMES, PERSISTENT_BOT_COUNT } from "./constants";
 import { BIOMES, getBiomeName } from "./biomes";
 import { applyMatchProgression } from "./progression";
 import { createRng, pickOne } from "./random";
+import { saveRemoteGameState } from "./remotePersistence";
 import { applyTraitPsychology } from "./traits";
 import type { BaseStats, Bot, BotAffinities, BotJournalEntry, CareerStats, MatchState, PersistentBot, Psychology, Relationship } from "./types";
 
@@ -38,7 +39,9 @@ export function savePersistentBots(pool: PersistentBot[]): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(pool));
+  const normalizedPool = pool.map(normalizePersistentBot);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizedPool));
+  saveRemoteGameState({ persistentBots: normalizedPool });
 }
 
 export function updatePersistentBotsAfterMatch(match: MatchState, matchNumber?: number): PersistentBot[] {

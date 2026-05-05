@@ -1,5 +1,6 @@
 import { BOT_COUNT, PERSISTENT_BOT_COUNT } from "./constants";
 import { createRng, shuffle } from "./random";
+import { saveRemoteGameState } from "./remotePersistence";
 import type { PersistentBot } from "./types";
 
 const ARENA_QUEUE_KEY = "ai-battle:arena-queue:v1";
@@ -118,6 +119,11 @@ function saveQueueIds(ids: string[]): void {
     return;
   }
   window.localStorage.setItem(ARENA_QUEUE_KEY, JSON.stringify(ids));
+  saveRemoteGameState({ arenaQueueIds: ids });
+}
+
+export function replaceArenaQueueIds(ids: string[]): void {
+  saveQueueIds(ids);
 }
 
 function hashSeed(input: string): number {

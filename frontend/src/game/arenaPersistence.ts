@@ -1,4 +1,5 @@
 import type { ArenaState, BasicMatchResult } from "./types";
+import { saveRemoteGameState } from "./remotePersistence";
 
 const ARENA_STATE_KEY = "ai-battle:arena-state:v1";
 const BASIC_RESULTS_KEY = "ai-battle:basic-results:v1";
@@ -36,6 +37,7 @@ export function saveArenaState(state: ArenaState): void {
   }
 
   window.localStorage.setItem(ARENA_STATE_KEY, JSON.stringify(state));
+  saveRemoteGameState({ arenaState: state });
 }
 
 export function loadBasicMatchResults(): BasicMatchResult[] {
@@ -74,9 +76,19 @@ export function saveBasicMatchResult(result: BasicMatchResult): BasicMatchResult
 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(BASIC_RESULTS_KEY, JSON.stringify(results));
+    saveRemoteGameState({ basicResults: results });
   }
 
   return results;
+}
+
+export function replaceBasicMatchResults(results: BasicMatchResult[]): BasicMatchResult[] {
+  const nextResults = results.slice(0, MAX_BASIC_RESULTS);
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(BASIC_RESULTS_KEY, JSON.stringify(nextResults));
+    saveRemoteGameState({ basicResults: nextResults });
+  }
+  return nextResults;
 }
 
 export function getNextMatchNumber(): number {

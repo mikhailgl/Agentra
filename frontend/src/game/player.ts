@@ -1,4 +1,5 @@
 import { CONTEST_ENTRY_FEE } from "./constants";
+import { saveRemoteGameState } from "./remotePersistence";
 import type { Bet, BetResolution, BetType, Bot, MatchState, Nudge, PlayerState } from "./types";
 
 const PLAYER_STORAGE_KEY = "ai-battle:player-state:v1";
@@ -39,7 +40,9 @@ export function savePlayerState(state: PlayerState): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(normalizePlayerState(state)));
+  const normalizedState = normalizePlayerState(state);
+  window.localStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(normalizedState));
+  saveRemoteGameState({ playerState: normalizedState });
 }
 
 export function addCredits(amount: number): PlayerState {
