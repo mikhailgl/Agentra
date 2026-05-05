@@ -16,6 +16,7 @@ export const MAX_EVENTS = 18;
 export const EVENT_DEBOUNCE_MS = 1800;
 export const MEDKIT_HEAL = 35;
 export const SPONSOR_DROP_RADIUS = 48;
+export const CONTEST_ENTRY_FEE = 50;
 export const SOCIAL_SCAN_RANGE = 240;
 export const ALLIANCE_MIN_MS = 22_000;
 export const ALLIANCE_MAX_MS = 42_000;

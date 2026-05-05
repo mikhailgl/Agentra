@@ -165,7 +165,7 @@ function drawLoot(context: CanvasRenderingContext2D, match: MatchState): void {
     } else {
       context.beginPath();
       context.arc(item.x, item.y, 10, 0, Math.PI * 2);
-      context.fillStyle = item.type === "armor" ? "#93c5fd" : "#c4b5fd";
+      context.fillStyle = item.type === "armor" ? "#93c5fd" : item.type === "credits" ? "#facc15" : "#c4b5fd";
       context.fill();
       context.strokeStyle = "#f8fafc";
       context.lineWidth = 2;

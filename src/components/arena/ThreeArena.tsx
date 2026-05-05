@@ -4,6 +4,8 @@ import { Suspense } from "react";
 import * as THREE from "three";
 import { ARENA_WORLD_SIZE } from "../../lib/simulation/simulationTo3D";
 import type { ArenaViewModel, CameraMode } from "../../lib/simulation/types";
+import { ArenaCreature } from "./ArenaCreature";
+import { ArenaEventMarker } from "./ArenaEventMarker";
 import { BotAvatar } from "./BotAvatar";
 import { LootPickup } from "./LootPickup";
 import { ProjectileEffect } from "./ProjectileEffect";
@@ -25,14 +27,13 @@ export function ThreeArena({
   onClearSelection: () => void;
 }) {
   const recentVisualEvents = arena.events
-    .filter((event) => ["damage", "kill", "loot", "winner", "player"].includes(event.kind))
+    .filter((event) => ["damage", "kill", "loot", "winner", "player", "system", "avoid"].includes(event.kind))
     .slice(0, 10);
 
   return (
     <div className="three-arena">
       <Canvas shadows={{ type: THREE.PCFShadowMap }} camera={{ position: [0, 28, 31], fov: 46 }} onPointerMissed={onClearSelection}>
         <color attach="background" args={["#0b1110"]} />
-        <fog attach="fog" args={["#0b1110", 34, 70]} />
         <ambientLight intensity={0.55} />
         <directionalLight position={[12, 18, 8]} intensity={2.2} castShadow shadow-mapSize={[2048, 2048]} />
         <Suspense fallback={null}>
@@ -59,8 +60,14 @@ export function ThreeArena({
           <Grid args={[ARENA_WORLD_SIZE, ARENA_WORLD_SIZE]} cellSize={2.5} sectionSize={10} fadeDistance={52} fadeStrength={1.6} infiniteGrid={false} position={[0, 0.018, 0]} />
           <ArenaWalls />
           <ArenaObstacles />
+          {arena.arenaEvents.map((event) => (
+            <ArenaEventMarker key={event.id} event={event} />
+          ))}
           {arena.loot.map((loot) => (
             <LootPickup key={loot.id} loot={loot} />
+          ))}
+          {arena.creatures.map((creature) => (
+            <ArenaCreature key={creature.id} creature={creature} />
           ))}
           {arena.bots.map((bot) => (
             <BotAvatar key={bot.id} bot={bot} onSelect={onSelectBot} />

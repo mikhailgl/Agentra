@@ -7,9 +7,23 @@ import {
   SPONSOR_DROP_RADIUS,
   WEAPONS,
 } from "./constants";
+import { addNarrativeMoment, forceArenaEvent as forceArenaEventInternal, isPointInActiveDangerZone, isSuddenDeathActive, updateArenaEventSystem } from "./arenaEvents";
 import { decideBotAction } from "./ai";
 import { clampToMap, getBiomeAt, getBiomeName } from "./biomes";
 import { createLegacyWeaponLoot, createRandomLoot } from "./loot";
+import {
+  LOW_HP_THRESHOLD,
+  createFirstBloodEvent,
+  createKillEvent,
+  createKillStreakEvent,
+  createLowHpEvent,
+  createMatchWinnerEvent,
+  createNearDeathEscapeEvent,
+  createSponsorDropEvent,
+  createWeaponPickupEvent,
+  emitMatchEvent,
+  nextMatchEventBase,
+} from "./matchEvents";
 import { distance, randomPointInCircle, moveAway, moveToward } from "./math";
 import { createRng } from "./random";
 import {
@@ -25,7 +39,7 @@ import {
 } from "./relationships";
 import { estimateBotStrength } from "./socialAI";
 import type { BotDecision } from "./ai";
-import type { BehaviorState, BiomeType, Bot, Creature, GameEvent, InfluenceType, LootItem, MapEvent, MatchState, Nudge, Weapon } from "./types";
+import type { ArenaEventType, BehaviorState, BiomeType, Bot, Creature, EquipmentItem, GameEvent, InfluenceType, LootItem, MapEvent, MatchState, Nudge, Weapon } from "./types";
 
 export type SponsorDropKind = Weapon["name"] | "Medkit";
 
@@ -41,11 +55,12 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
     return match;
   }
 
+  ensureRuntimeMatchEventFields(match);
   match.elapsedMs += deltaMs;
   const moveDistanceScale = deltaMs / 1000;
   expireAlliances(match, addEvent.bind(null, match));
   updatePeacefulProximity(match, deltaMs);
-  updateMapEvents(match, deltaMs);
+  updateArenaEventSystem(match, deltaMs, addEvent.bind(null, match));
 
   for (const bot of match.bots) {
     ensureRuntimeBotFields(bot);
@@ -75,6 +90,33 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
         label: "Fleeing",
       });
       recordFlee(match, bot);
+    }
+
+    if (decision.action === "flee_creature") {
+      const next = moveAway(bot, decision.target, moveDistance * 1.3);
+      bot.x = next.x;
+      bot.y = next.y;
+      addEvent(match, `${bot.name} flees from ${decision.target.name}.`, `flee-creature-${bot.id}-${decision.target.id}`, 2600, {
+        kind: "avoid",
+        botId: bot.id,
+        x: bot.x,
+        y: bot.y,
+        label: "Flee",
+      });
+      recordFlee(match, bot);
+    }
+
+    if (decision.action === "escape_zone") {
+      const next = moveToward(bot, decision.target, moveDistance * 1.4);
+      bot.x = next.x;
+      bot.y = next.y;
+      addEvent(match, `${bot.name} escapes the danger zone.`, `escape-zone-${bot.id}`, 3000, {
+        kind: "avoid",
+        botId: bot.id,
+        x: bot.x,
+        y: bot.y,
+        label: "Escape",
+      });
     }
 
     if (decision.action === "avoid") {
@@ -153,6 +195,10 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
       tryAttack(match, bot, decision.target);
     }
 
+    if (decision.action === "attack_creature") {
+      tryAttackCreature(match, bot, decision.target);
+    }
+
     pickupLoot(match, bot);
   }
 
@@ -175,13 +221,21 @@ export function spawnSponsorDrop(match: MatchState, botId: string, kind: Sponsor
   const item = createSponsorItem(match, position.x, position.y, kind);
   match.loot.push(item);
   addEvent(match, `${bot.name} receives a sponsor drop: ${getLootLabel(item)}.`, undefined, 0, {
-    kind: "loot",
+    kind: "sponsor",
     botId: bot.id,
     x: position.x,
     y: position.y,
     label: "Sponsor",
   });
+  emitMatchEvent(match, createSponsorDropEvent(bot, item, nextMatchEventBase(match, "sponsor-drop")));
   return true;
+}
+
+export function forceArenaEvent(match: MatchState, type: ArenaEventType): boolean {
+  if (match.ended) {
+    return false;
+  }
+  return Boolean(forceArenaEventInternal(match, type, addEvent.bind(null, match)));
 }
 
 export function applyPlayerNudge(
@@ -295,9 +349,11 @@ function tryAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = f
   const biomeAffinity = attacker.affinities.biomes[biome.id] ?? 1;
   const damage = Math.max(3, Math.round(weapon.damage * (0.86 + weaponAffinity * 0.12 + biomeAffinity * 0.04) * (1 - defense)));
   const appliedDamage = Math.min(target.health, damage);
+  const previousTargetHealth = target.health;
   target.health = Math.max(0, target.health - appliedDamage);
   attacker.damageDealt += appliedDamage;
   recordAttack(attacker, target);
+  emitLowHpIfNeeded(match, target, previousTargetHealth);
   addEvent(
     match,
     `${attacker.name} hit ${target.name} with ${weapon.name} for ${appliedDamage}.`,
@@ -319,9 +375,7 @@ function tryAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = f
 
   if (target.health <= 0) {
     const targetStrength = estimateBotStrength(target);
-    target.alive = false;
-    target.behavior = "wandering";
-    target.survivalTimeMs = match.elapsedMs;
+    eliminateBot(match, target);
     attacker.kills += 1;
     attacker.weaponKills[weapon.name] = (attacker.weaponKills[weapon.name] ?? 0) + 1;
     if (isBetrayal) {
@@ -336,6 +390,47 @@ function tryAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = f
       y: target.y,
       label: "Eliminated",
     });
+    emitKillEvents(match, attacker, target);
+  }
+}
+
+function tryAttackCreature(match: MatchState, attacker: Bot, creature: Creature): void {
+  const weapon = attacker.inventory.weapon;
+  if (!weapon || creature.health <= 0) {
+    return;
+  }
+
+  if (match.elapsedMs - attacker.lastAttackAt < weapon.cooldownMs) {
+    return;
+  }
+
+  attacker.lastAttackAt = match.elapsedMs;
+  const damage = Math.max(4, Math.round(weapon.damage * (0.78 + attacker.psychology.aggression * 0.24)));
+  creature.health -= damage;
+  attacker.damageDealt += damage;
+  addEvent(match, `${attacker.name} attacks ${creature.name} for ${damage}.`, `bot-creature-hit-${attacker.id}-${creature.id}`, 900, {
+    kind: "damage",
+    botId: attacker.id,
+    x: creature.x,
+    y: creature.y,
+    label: `-${damage}`,
+  });
+
+  if (creature.health <= 0) {
+    attacker.xp += 18;
+    addEvent(match, `${attacker.name} kills ${creature.name} and earns arena XP.`, undefined, 0, {
+      kind: "system",
+      botId: attacker.id,
+      x: creature.x,
+      y: creature.y,
+      label: "+XP",
+    });
+    addNarrativeMoment(match, {
+      title: `${attacker.name} drove back the wolf pack`,
+      severity: "epic",
+      relatedBotIds: [attacker.id],
+      location: { x: creature.x, z: creature.y },
+    }, `creature-kill-${attacker.id}`);
   }
 }
 
@@ -350,10 +445,24 @@ function pickupLoot(match: MatchState, bot: Bot): void {
 
   const item = match.loot[lootIndex];
 
+  if (item.type === "credits") {
+    match.loot.splice(lootIndex, 1);
+    bot.carriedCredits += item.amount;
+    addEvent(match, `${bot.name} picks up ${item.amount} dropped credits.`, undefined, 0, {
+      kind: "loot",
+      botId: bot.id,
+      x: bot.x,
+      y: bot.y,
+      label: `+${item.amount}`,
+    });
+    return;
+  }
+
   if (item.type === "medkit") {
     match.loot.splice(lootIndex, 1);
     const previousHealth = bot.health;
-    bot.health = Math.min(100, bot.health + item.healAmount);
+    const healAmount = isSuddenDeathActive(match) ? Math.round(item.healAmount * 0.35) : item.healAmount;
+    bot.health = Math.min(100, bot.health + healAmount);
     addEvent(match, `${bot.name} finds a Med Kit in the ${getBiomeName(bot.currentBiome)} and restores ${Math.round(bot.health - previousHealth)} health.`, undefined, 0, {
       kind: "loot",
       botId: bot.id,
@@ -361,6 +470,9 @@ function pickupLoot(match: MatchState, bot: Bot): void {
       y: bot.y,
       label: "Heal",
     });
+    if (previousHealth <= LOW_HP_THRESHOLD && bot.health > LOW_HP_THRESHOLD) {
+      emitMatchEvent(match, createNearDeathEscapeEvent(bot, nextMatchEventBase(match, "near-death-escape")));
+    }
     return;
   }
 
@@ -375,6 +487,16 @@ function pickupLoot(match: MatchState, bot: Bot): void {
       y: bot.y,
       label: item.name,
     });
+    emitMatchEvent(match, createWeaponPickupEvent(bot, item, nextMatchEventBase(match, "weapon-pickup")));
+    if (item.rarity === "rare" || item.rarity === "legendary") {
+      addNarrativeMoment(match, {
+        title: `${bot.name} found ${item.name}`,
+        description: "The loot drop has changed the fight.",
+        severity: "epic",
+        relatedBotIds: [bot.id],
+        location: { x: bot.x, z: bot.y },
+      }, `rare-pickup-${item.id}`);
+    }
     return;
   }
 
@@ -390,11 +512,20 @@ function pickupLoot(match: MatchState, bot: Bot): void {
     y: bot.y,
     label: item.name,
   });
+  emitMatchEvent(match, createWeaponPickupEvent(bot, item, nextMatchEventBase(match, "item-pickup")));
 }
 
 function shouldPickup(bot: Bot, item: LootItem, match: MatchState): boolean {
+  if (isPointInActiveDangerZone(match, item) && bot.health < 70 && bot.psychology.riskTolerance < 0.82) {
+    return false;
+  }
+
   if (item.type === "medkit") {
     return bot.health < 82 || bot.personality === "Coward";
+  }
+
+  if (item.type === "credits") {
+    return true;
   }
 
   const score = evaluateLoot(bot, item);
@@ -463,7 +594,51 @@ function finishIfNeeded(match: MatchState): void {
       y: living[0]?.y,
       label: "Winner",
     });
+    if (living[0]?.carriedCredits) {
+      addEvent(match, `${living[0].name} leaves with ${living[0].carriedCredits} credits.`, undefined, 0, {
+        kind: "winner",
+        botId: living[0].id,
+        x: living[0].x,
+        y: living[0].y,
+        label: `+${living[0].carriedCredits}`,
+      });
+    }
+    if (living[0]) {
+      emitMatchEvent(match, createMatchWinnerEvent(living[0], nextMatchEventBase(match, "match-winner")));
+    }
   }
+}
+
+function emitKillEvents(match: MatchState, attacker: Bot, target: Bot): void {
+  match.matchEventState.lastKillAtMs = match.elapsedMs;
+  emitMatchEvent(match, createKillEvent(attacker, target, nextMatchEventBase(match, "kill")));
+
+  if (!match.matchEventState.firstBloodEmitted) {
+    match.matchEventState.firstBloodEmitted = true;
+    emitMatchEvent(match, createFirstBloodEvent(attacker, target, nextMatchEventBase(match, "first-blood")));
+  }
+
+  if (attacker.kills >= 2 && match.matchEventState.killStreaks[attacker.id] !== attacker.kills) {
+    match.matchEventState.killStreaks[attacker.id] = attacker.kills;
+    emitMatchEvent(match, createKillStreakEvent(attacker, attacker.kills, nextMatchEventBase(match, "kill-streak")));
+    addNarrativeMoment(match, {
+      title: `${attacker.name} is on a ${attacker.kills}-kill streak`,
+      severity: "epic",
+      relatedBotIds: [attacker.id],
+      location: { x: attacker.x, z: attacker.y },
+    }, `kill-streak-${attacker.id}-${attacker.kills}`);
+  }
+}
+
+function emitLowHpIfNeeded(match: MatchState, bot: Bot, previousHealth: number): void {
+  if (previousHealth <= LOW_HP_THRESHOLD || bot.health <= 0 || bot.health > LOW_HP_THRESHOLD) {
+    return;
+  }
+  if (match.matchEventState.lowHpBotIds[bot.id]) {
+    return;
+  }
+  match.matchEventState.lowHpBotIds[bot.id] = true;
+  emitMatchEvent(match, createLowHpEvent(bot, nextMatchEventBase(match, "low-hp")));
 }
 
 function addEvent(
@@ -491,6 +666,129 @@ function addEvent(
 
 function getLootLabel(item: LootItem): string {
   return item.name;
+}
+
+function eliminateBot(match: MatchState, bot: Bot): void {
+  bot.alive = false;
+  bot.behavior = "wandering";
+  bot.survivalTimeMs = match.elapsedMs;
+  dropInventoryAndCredits(match, bot);
+}
+
+function dropInventoryAndCredits(match: MatchState, bot: Bot): void {
+  const droppedNames: string[] = [];
+  let dropIndex = 0;
+
+  if (bot.inventory.weapon) {
+    match.loot.push(createWeaponDrop(match, bot, bot.inventory.weapon, dropIndex++));
+    droppedNames.push(bot.inventory.weapon.name);
+    bot.inventory.weapon = null;
+  }
+
+  if (bot.inventory.armor) {
+    match.loot.push(createEquipmentDrop(match, bot, bot.inventory.armor, dropIndex++));
+    droppedNames.push(bot.inventory.armor.name);
+    bot.inventory.armor = null;
+  }
+
+  if (bot.inventory.tool) {
+    match.loot.push(createEquipmentDrop(match, bot, bot.inventory.tool, dropIndex++));
+    droppedNames.push(bot.inventory.tool.name);
+    bot.inventory.tool = null;
+  }
+
+  if (bot.carriedCredits > 0) {
+    const credits = bot.carriedCredits;
+    match.loot.push(createCreditDrop(match, bot, credits, dropIndex++));
+    droppedNames.push(`${credits} credits`);
+    bot.carriedCredits = 0;
+  }
+
+  if (droppedNames.length) {
+    addEvent(match, `${bot.name} drops ${formatDroppedItems(droppedNames)}.`, undefined, 0, {
+      kind: "loot",
+      botId: bot.id,
+      x: bot.x,
+      y: bot.y,
+      label: "Dropped",
+    });
+  }
+}
+
+function createWeaponDrop(match: MatchState, bot: Bot, weapon: Weapon, index: number): LootItem {
+  const point = getDropPoint(bot, index);
+  return {
+    id: `drop-${bot.id}-${match.nextEventId}-${index}-weapon`,
+    x: point.x,
+    y: point.y,
+    type: "weapon",
+    name: weapon.name,
+    category: "weapon",
+    rarity: "common",
+    effects: { damage: weapon.damage, range: weapon.range, accuracy: weapon.accuracy },
+    weapon,
+  };
+}
+
+function createEquipmentDrop(match: MatchState, bot: Bot, item: EquipmentItem, index: number): LootItem {
+  const point = getDropPoint(bot, index);
+  if (item.category === "armor") {
+    return {
+      id: `drop-${bot.id}-${match.nextEventId}-${index}-armor`,
+      x: point.x,
+      y: point.y,
+      type: "armor",
+      name: item.name,
+      category: "armor",
+      rarity: item.rarity,
+      preferredBiomes: item.preferredBiomes,
+      effects: item.effects,
+      item,
+    };
+  }
+
+  return {
+    id: `drop-${bot.id}-${match.nextEventId}-${index}-tool`,
+    x: point.x,
+    y: point.y,
+    type: "tool",
+    name: item.name,
+    category: "tool",
+    rarity: item.rarity,
+    preferredBiomes: item.preferredBiomes,
+    effects: item.effects,
+    item,
+  };
+}
+
+function createCreditDrop(match: MatchState, bot: Bot, amount: number, index: number): LootItem {
+  const point = getDropPoint(bot, index);
+  return {
+    id: `drop-${bot.id}-${match.nextEventId}-${index}-credits`,
+    x: point.x,
+    y: point.y,
+    type: "credits",
+    name: `${amount} credits`,
+    category: "credits",
+    rarity: amount >= 150 ? "rare" : amount >= 75 ? "uncommon" : "common",
+    effects: {},
+    amount,
+  };
+}
+
+function getDropPoint(bot: Bot, index: number): { x: number; y: number } {
+  const angle = index * 2.399963 + bot.x * 0.013 + bot.y * 0.017;
+  const radius = 8 + index * 5;
+  return clampToMap({
+    x: bot.x + Math.cos(angle) * radius,
+    y: bot.y + Math.sin(angle) * radius,
+  });
+}
+
+function formatDroppedItems(items: string[]): string {
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 function ensureRuntimeBotFields(bot: Bot): void {
@@ -524,6 +822,32 @@ function ensureRuntimeBotFields(bot: Bot): void {
   bot.biomeTimeMs ??= {};
   bot.weaponKills ??= {};
   bot.thoughts ??= [];
+  bot.carriedCredits ??= 0;
+}
+
+function ensureRuntimeMatchEventFields(match: MatchState): void {
+  match.matchEvents ??= [];
+  match.matchEventState ??= {
+    firstBloodEmitted: false,
+    lowHpBotIds: {},
+    killStreaks: {},
+    lastKillAtMs: 0,
+    lastArenaEventAtMs: -Infinity,
+    firstArenaEventEmitted: false,
+    suddenDeathStarted: false,
+    eventCounts: {},
+    lastNarrativeByKey: {},
+  };
+  match.matchEventState.lowHpBotIds ??= {};
+  match.matchEventState.killStreaks ??= {};
+  match.matchEventState.lastKillAtMs ??= 0;
+  match.matchEventState.lastArenaEventAtMs ??= -Infinity;
+  match.matchEventState.firstArenaEventEmitted ??= false;
+  match.matchEventState.suddenDeathStarted ??= false;
+  match.matchEventState.eventCounts ??= {};
+  match.matchEventState.lastNarrativeByKey ??= {};
+  match.arenaEvents ??= [];
+  match.narrativeMoments ??= [];
 }
 
 function recordBotThought(match: MatchState, bot: Bot, decision: BotDecision): void {
@@ -559,7 +883,7 @@ function getThoughtSignature(decision: BotDecision): string {
 }
 
 function getThoughtKind(decision: BotDecision): BehaviorState | "combat" | "social" | "loot" {
-  if (decision.action === "attack" || decision.action === "chase" || decision.action === "betray" || decision.action === "refuse_attack") {
+  if (decision.action === "attack" || decision.action === "attack_creature" || decision.action === "chase" || decision.action === "betray" || decision.action === "refuse_attack") {
     return "combat";
   }
   if (decision.action === "seek_loot") {
@@ -568,7 +892,7 @@ function getThoughtKind(decision: BotDecision): BehaviorState | "combat" | "soci
   if (decision.action === "follow" || decision.action === "avoid" || decision.action === "propose_alliance" || decision.action === "maintain_alliance") {
     return "social";
   }
-  if (decision.action === "flee") {
+  if (decision.action === "flee" || decision.action === "flee_creature" || decision.action === "escape_zone") {
     return "fleeing";
   }
   return "wandering";
@@ -576,6 +900,9 @@ function getThoughtKind(decision: BotDecision): BehaviorState | "combat" | "soci
 
 function describeBotThought(bot: Bot, decision: BotDecision): string {
   if (decision.action === "flee") return `${decision.target.name} is too dangerous right now. I need distance.`;
+  if (decision.action === "flee_creature") return `${decision.target.name} is too close. Break away.`;
+  if (decision.action === "attack_creature") return `${decision.target.name} is exposed. Clear the threat.`;
+  if (decision.action === "escape_zone") return "This zone is unstable. Get out now.";
   if (decision.action === "avoid") return `${decision.target.name} feels like a bad fight: ${decision.reason}.`;
   if (decision.action === "seek_loot") return `That ${decision.target.name} could improve my odds.`;
   if (decision.action === "attack") return `${decision.target.name} is in range. Take the shot.`;
@@ -673,7 +1000,9 @@ function updateMapEvents(match: MatchState, deltaMs: number): void {
       if (!zone) continue;
       for (const bot of match.bots.filter((candidate) => candidate.alive && candidate.currentBiome === zone.id)) {
         if (deterministicRoll(`${event.id}:${bot.id}:${Math.floor(match.elapsedMs / 1800)}`) < 0.02 * deltaMs / 16) {
+          const previousHealth = bot.health;
           bot.health = Math.max(1, bot.health - 2);
+          emitLowHpIfNeeded(match, bot, previousHealth);
           addEvent(match, `${bot.name} relocates as ${describeMapEvent(event)} disrupts the ${zone.name}.`, `hazard-${event.id}-${bot.id}`, 3500, {
             kind: "system",
             botId: bot.id,
@@ -753,10 +1082,10 @@ function spawnCreature(match: MatchState, biome: BiomeType, x: number, y: number
 }
 
 function updateCreatures(match: MatchState): void {
-  match.creatures = match.creatures.filter((creature) => creature.health > 0);
+  match.creatures = match.creatures.filter((creature) => creature.health > 0 && (!creature.expiresAtMs || creature.expiresAtMs > match.elapsedMs));
   for (const creature of match.creatures) {
     const target = match.bots
-      .filter((bot) => bot.alive && bot.currentBiome === creature.biome)
+      .filter((bot) => bot.alive && distance(bot, creature) <= 260)
       .sort((a, b) => distance(a, creature) - distance(b, creature))[0];
     if (!target) continue;
     creature.targetBotId = target.id;
@@ -788,9 +1117,15 @@ function updateCreatures(match: MatchState): void {
       label: `-${creature.damage}`,
     });
     if (target.health <= 0) {
-      target.alive = false;
-      target.survivalTimeMs = match.elapsedMs;
+      eliminateBot(match, target);
+      match.matchEventState.lastKillAtMs = match.elapsedMs;
       addEvent(match, `${target.name} was eliminated by ${creature.name}.`, undefined, 0, { kind: "kill", targetId: target.id, x: target.x, y: target.y, label: "Creature" });
+      addNarrativeMoment(match, {
+        title: `${creature.name} eliminated ${target.name}`,
+        severity: "danger",
+        relatedBotIds: [target.id],
+        location: { x: target.x, z: target.y },
+      }, `creature-elim-${target.id}`);
     }
   }
 }

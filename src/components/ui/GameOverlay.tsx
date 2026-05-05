@@ -38,7 +38,7 @@ export function GameOverlay({
           <span>{player.draftedBotIds.length} drafted</span>
         </div>
         <div className="camera-controls" aria-label="Camera mode">
-          {(["orbit", "follow", "auto"] as CameraMode[]).map((mode) => (
+          {(["free", "follow_bot", "follow_action", "follow_leader"] as CameraMode[]).map((mode) => (
             <button
               key={mode}
               type="button"

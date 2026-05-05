@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ThreeArena } from "./components/arena/ThreeArena";
+import { CustomBotCreator } from "./components/CustomBotCreator";
+import { MatchActionDock } from "./components/ui/MatchActionDock";
+import { MatchHighlightOverlay } from "./components/ui/MatchHighlightOverlay";
 import { MatchLogOverlay } from "./components/ui/MatchLogOverlay";
 import { SpectatorOverlay } from "./components/ui/SpectatorOverlay";
 import { getNextMatchNumber, loadBasicMatchResults, saveArenaState, saveBasicMatchResult } from "./game/arenaPersistence";
 import { createMatch } from "./game/createMatch";
-import { updatePersistentBotsAfterMatch } from "./game/persistence";
-import { stepSimulation } from "./game/simulation";
-import type { ArenaState, BasicMatchResult, MatchState } from "./game/types";
+import { awardCredits, BOT_CONTEST_ENTRY_FEE, getPlayerState, placeBet, resolveMatchBets, savePlayerState, spendCredits } from "./game/player";
+import { addCustomPersistentBot, loadPersistentBots, updatePersistentBotsAfterMatch } from "./game/persistence";
+import { spawnSponsorDrop, stepSimulation } from "./game/simulation";
+import type { ArenaState, BasicMatchResult, BaseStats, BetType, BotAffinities, MatchState, PersistentBot, Psychology } from "./game/types";
+import type { SponsorDropKind } from "./game/simulation";
 import { toArenaViewModel } from "./lib/simulation/simulationTo3D";
 import type { CameraMode } from "./lib/simulation/types";
 
 const INTERMISSION_MS = 5_000;
+
+type CustomBotBuild = {
+  name: string;
+  baseStats: BaseStats;
+  psychology: Psychology;
+  traits: string[];
+  affinities: BotAffinities;
+  tacticalInstruction: string;
+};
 
 function getLatestWinnerId(): string | undefined {
   const winnerId = loadBasicMatchResults()[0]?.winnerBotId;
@@ -41,9 +55,13 @@ function App() {
   const [matchView, setMatchView] = useState(matchRef.current);
   const [arenaState, setArenaState] = useState(arenaStateRef.current);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
-  const [cameraMode, setCameraMode] = useState<CameraMode>("auto");
+  const [cameraMode, setCameraMode] = useState<CameraMode>("follow_action");
   const [cameraResetToken, setCameraResetToken] = useState(0);
   const [basicResults, setBasicResults] = useState<BasicMatchResult[]>(() => loadBasicMatchResults());
+  const [playerState, setPlayerState] = useState(() => getPlayerState());
+  const [persistentBots, setPersistentBots] = useState<PersistentBot[]>(() => loadPersistentBots());
+  const [showCreator, setShowCreator] = useState(false);
+  const playerStateRef = useRef(playerState);
   const [, forceClockSync] = useState(0);
 
   const selectedBot = useMemo(
@@ -56,12 +74,21 @@ function App() {
     [matchView, selectedBotId],
   );
 
+  const queuedBots = useMemo(() => {
+    const activeBotIds = new Set(matchView.bots.map((bot) => bot.id));
+    return persistentBots.filter((bot) => !activeBotIds.has(bot.id));
+  }, [matchView.bots, persistentBots]);
+
   const syncMatchView = useCallback(() => {
     setMatchView({
       ...matchRef.current,
       bots: [...matchRef.current.bots],
       loot: [...matchRef.current.loot],
       events: [...matchRef.current.events],
+      matchEvents: [...matchRef.current.matchEvents],
+      arenaEvents: [...matchRef.current.arenaEvents],
+      narrativeMoments: [...matchRef.current.narrativeMoments],
+      creatures: [...matchRef.current.creatures],
       historyEvents: [...matchRef.current.historyEvents],
     });
   }, []);
@@ -73,13 +100,13 @@ function App() {
   }, []);
 
   const startMatch = useCallback(
-    (matchNumber: number, carryOverBotId?: string) => {
-      const nextMatch = createMatch(carryOverBotId);
+    (matchNumber: number, carryOverBotId?: string, carryOverCredits = 0) => {
+      const nextMatch = createMatch(carryOverBotId, carryOverCredits);
       matchRef.current = nextMatch;
       lastFrameAtRef.current = null;
       lastUiSyncAtRef.current = 0;
       setSelectedBotId(null);
-      setCameraMode("auto");
+      setCameraMode("follow_action");
       setCameraResetToken((token) => token + 1);
       updateArenaState(createRunningArenaState(matchNumber, nextMatch));
       setMatchView(nextMatch);
@@ -98,8 +125,14 @@ function App() {
     }
 
     match.finalized = true;
-    updatePersistentBotsAfterMatch(match);
+    setPersistentBots(updatePersistentBotsAfterMatch(match));
     const winner = match.winnerId ? match.bots.find((bot) => bot.id === match.winnerId) ?? null : null;
+    const resolved = resolveMatchBets(playerStateRef.current, match).state;
+    const survivorCredits = winner?.custom && winner.carriedCredits > 0 ? winner.carriedCredits : 0;
+    const nextPlayer = survivorCredits > 0 ? awardCredits(resolved, survivorCredits) : resolved;
+    playerStateRef.current = nextPlayer;
+    savePlayerState(nextPlayer);
+    setPlayerState(nextPlayer);
 
     setBasicResults(
       saveBasicMatchResult({
@@ -134,13 +167,69 @@ function App() {
 
   const selectBot = useCallback((botId: string) => {
     setSelectedBotId(botId);
-    setCameraMode("follow");
+    setCameraMode("follow_bot");
   }, []);
 
   const resetCamera = useCallback(() => {
-    setCameraMode("auto");
+    setCameraMode("free");
     setCameraResetToken((token) => token + 1);
   }, []);
+
+  const handlePlaceBet = useCallback((type: BetType, botId: string, amount: number, odds: number) => {
+    const nextPlayer = placeBet(playerStateRef.current, matchRef.current, type, botId, amount, odds);
+    if (!nextPlayer) {
+      return;
+    }
+    playerStateRef.current = nextPlayer;
+    savePlayerState(nextPlayer);
+    setPlayerState(nextPlayer);
+  }, []);
+
+  const handleSponsorDrop = useCallback((botId: string, kind: SponsorDropKind) => {
+    if (!spawnSponsorDrop(matchRef.current, botId, kind)) {
+      return;
+    }
+    const nextPlayer = {
+      ...playerStateRef.current,
+      stats: {
+        ...playerStateRef.current.stats,
+        totalSponsorshipsSent: playerStateRef.current.stats.totalSponsorshipsSent + 1,
+      },
+    };
+    playerStateRef.current = nextPlayer;
+    savePlayerState(nextPlayer);
+    setPlayerState(nextPlayer);
+    syncMatchView();
+  }, [syncMatchView]);
+
+  const handleCreateCustomBot = useCallback((build: CustomBotBuild, enterContest: boolean) => {
+    const [createdBot] = addCustomPersistentBot(build);
+    setPersistentBots(loadPersistentBots());
+    setShowCreator(false);
+    if (!createdBot || !enterContest) {
+      return;
+    }
+    const chargedPlayer = spendCredits(playerStateRef.current, BOT_CONTEST_ENTRY_FEE);
+    if (!chargedPlayer) {
+      return;
+    }
+    playerStateRef.current = chargedPlayer;
+    savePlayerState(chargedPlayer);
+    setPlayerState(chargedPlayer);
+    startMatch(arenaStateRef.current.matchNumber + 1, createdBot.id, BOT_CONTEST_ENTRY_FEE);
+  }, [startMatch]);
+
+  useEffect(() => {
+    if (cameraMode !== "follow_bot") return;
+    if (!selectedBotId) {
+      setCameraMode("follow_action");
+      return;
+    }
+    const selected = matchView.bots.find((bot) => bot.id === selectedBotId);
+    if (selected && !selected.alive) {
+      setCameraMode("follow_action");
+    }
+  }, [cameraMode, matchView.bots, selectedBotId]);
 
   useEffect(() => {
     saveArenaState(arenaStateRef.current);
@@ -214,15 +303,30 @@ function App() {
           <SpectatorOverlay
             arenaState={arenaState}
             bots={matchView.bots}
+            queuedBots={queuedBots}
             selectedBot={selectedBot}
+            credits={playerState.credits}
             results={basicResults}
+            cameraMode={cameraMode}
             onSelectBot={selectBot}
+            onCameraModeChange={setCameraMode}
             onTogglePause={togglePause}
-            onFollowSelected={() => selectedBotId && setCameraMode("follow")}
             onResetCamera={resetCamera}
             onStartNextNow={startNextMatch}
+            narrativeMoments={matchView.narrativeMoments}
           />
-          <MatchLogOverlay events={matchView.events} selectedBot={selectedBot} />
+          <MatchActionDock
+            player={playerState}
+            bots={matchView.bots}
+            matchId={matchView.id}
+            selectedBot={selectedBot}
+            onPlaceBet={handlePlaceBet}
+            onSponsorDrop={handleSponsorDrop}
+            onCreateBot={() => setShowCreator(true)}
+          />
+          {showCreator && <CustomBotCreator credits={playerState.credits} entryFee={BOT_CONTEST_ENTRY_FEE} onClose={() => setShowCreator(false)} onCreate={handleCreateCustomBot} />}
+          <MatchHighlightOverlay events={matchView.matchEvents} />
+          <MatchLogOverlay events={matchView.events} matchEvents={matchView.matchEvents} selectedBot={selectedBot} />
         </div>
       </section>
     </main>

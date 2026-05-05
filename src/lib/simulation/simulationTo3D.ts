@@ -1,6 +1,6 @@
 import { MAP_CENTER, MAP_SIZE } from "../../game/constants";
-import type { Bet, Bot, GameEvent, LootItem, MapZone, MatchState } from "../../game/types";
-import type { ArenaBotView, ArenaEventView, ArenaLootView, ArenaViewModel, ArenaZoneView } from "./types";
+import type { ArenaEvent, Bet, Bot, Creature, GameEvent, LootItem, MapZone, MatchState } from "../../game/types";
+import type { ArenaBotView, ArenaCreatureView, ArenaEventView, ArenaLootView, ArenaMarkerView, ArenaViewModel, ArenaZoneView } from "./types";
 
 const ARENA_SCALE = 0.06;
 const HALF_MAP = MAP_SIZE / 2;
@@ -36,7 +36,9 @@ export function toArenaViewModel(
   return {
     bots: match.bots.map((bot) => toArenaBot(bot, match, selectedBotId, draftedBotIds, livingBets)),
     loot: match.loot.map(toArenaLoot),
+    creatures: (match.creatures ?? []).map((creature) => toArenaCreature(creature, match)),
     events: match.events.map((event) => toArenaEvent(event, match)).filter(Boolean) as ArenaEventView[],
+    arenaEvents: (match.arenaEvents ?? []).map(toArenaMarker),
     zones: match.zones.map(toArenaZone),
     aliveCount: match.bots.filter((bot) => bot.alive).length,
     elapsedMs: match.elapsedMs,
@@ -67,6 +69,9 @@ function toArenaBot(
     rotationY: Math.atan2(dx, dy),
     health: bot.health,
     alive: bot.alive,
+    kills: bot.kills,
+    damageDealt: bot.damageDealt,
+    survivalTimeMs: bot.survivalTimeMs,
     color: PERSONALITY_COLORS[bot.personality],
     behavior: bot.behavior,
     level: bot.level,
@@ -96,6 +101,17 @@ function toArenaLoot(item: LootItem): ArenaLootView {
   };
 }
 
+function toArenaCreature(creature: Creature, match: MatchState): ArenaCreatureView {
+  const target = creature.targetBotId ? match.bots.find((bot) => bot.id === creature.targetBotId) : null;
+  return {
+    id: creature.id,
+    name: creature.name,
+    position: worldToArenaPoint(creature.x, creature.y, 0.42),
+    health: creature.health,
+    targetPosition: target ? worldToArenaPoint(target.x, target.y, 1.05) : undefined,
+  };
+}
+
 function toArenaEvent(event: GameEvent, match: MatchState): ArenaEventView | null {
   const position = event.x !== undefined && event.y !== undefined ? worldToArenaPoint(event.x, event.y, 1.45) : undefined;
   const attacker = event.botId ? match.bots.find((bot) => bot.id === event.botId) : null;
@@ -108,6 +124,18 @@ function toArenaEvent(event: GameEvent, match: MatchState): ArenaEventView | nul
     position,
     from: attacker ? worldToArenaPoint(attacker.x, attacker.y, 1.1) : undefined,
     to: target ? worldToArenaPoint(target.x, target.y, 1.1) : position,
+  };
+}
+
+function toArenaMarker(event: ArenaEvent): ArenaMarkerView {
+  return {
+    id: event.id,
+    type: event.type,
+    title: event.title,
+    description: event.description,
+    position: event.location ? worldToArenaPoint(event.location.x, event.location.z, 0.08) : undefined,
+    severity: event.severity,
+    radius: event.type === "danger_zone" ? 145 * ARENA_SCALE : event.type === "rare_loot_drop" ? 72 * ARENA_SCALE : 96 * ARENA_SCALE,
   };
 }
 

@@ -13,11 +13,15 @@ const ARCHETYPES: Archetype[] = ["brute", "scout", "tactician", "survivor", "tri
 const STYLES: Style[] = ["aggressive", "defensive", "opportunistic", "stealthy", "adaptive"];
 
 export function CustomBotCreator({
+  credits,
+  entryFee,
   onClose,
   onCreate,
 }: {
+  credits: number;
+  entryFee: number;
   onClose: () => void;
-  onCreate: (build: { name: string; baseStats: BaseStats; psychology: Psychology; traits: string[]; affinities: BotAffinities; tacticalInstruction: string }) => void;
+  onCreate: (build: { name: string; baseStats: BaseStats; psychology: Psychology; traits: string[]; affinities: BotAffinities; tacticalInstruction: string }, enterContest: boolean) => void;
 }) {
   const [name, setName] = useState("");
   const [archetype, setArchetype] = useState<Archetype>("hunter");
@@ -37,7 +41,9 @@ export function CustomBotCreator({
   const spent = Object.values(stats).reduce((sum, value) => sum + value, 0);
   const remaining = POINTS - spent;
   const valid = name.trim().length >= 2 && remaining === 0 && Object.values(stats).every((value) => value >= 1 && value <= 10);
+  const canEnterContest = credits >= entryFee;
   const summary = useMemo(() => interpretBuild(stats, archetype, style, preferredBiome, preferredWeaponType, instruction), [archetype, instruction, preferredBiome, preferredWeaponType, stats, style]);
+  const buildBot = () => summary.build(name.trim() || "Custom Bot");
 
   return (
     <div className="modal-backdrop">
@@ -104,9 +110,14 @@ export function CustomBotCreator({
           <strong>Summary before release</strong>
           <p>{summary.text}</p>
         </div>
-        <button type="button" disabled={!valid} title={valid ? "" : "Spend exactly 35 points and provide a name"} onClick={() => onCreate(summary.build(name.trim() || "Custom Bot"))}>
-          Release into the arena
-        </button>
+        <div className="creator-actions">
+          <button type="button" className="secondary-button" disabled={!valid} title={valid ? "" : "Spend exactly 35 points and provide a name"} onClick={() => onCreate(buildBot(), false)}>
+            Create for free
+          </button>
+          <button type="button" disabled={!valid || !canEnterContest} title={!valid ? "Spend exactly 35 points and provide a name" : canEnterContest ? "" : `Need ${entryFee} credits to enter`} onClick={() => onCreate(buildBot(), true)}>
+            Enter contest ({entryFee} credits)
+          </button>
+        </div>
       </section>
     </div>
   );

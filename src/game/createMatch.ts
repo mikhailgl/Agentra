@@ -11,7 +11,7 @@ import { loadPersistentBots, clonePersistentBotForMatch } from "./persistence";
 import { createRng, shuffle } from "./random";
 import type { Bot, MatchState } from "./types";
 
-export function createMatch(carryOverBotId?: string): MatchState {
+export function createMatch(carryOverBotId?: string, carryOverCredits = 0): MatchState {
   const seed = Date.now() % 1_000_000_000;
   const rng = createRng(seed);
   const pool = loadPersistentBots();
@@ -23,11 +23,15 @@ export function createMatch(carryOverBotId?: string): MatchState {
   ];
   const bots: Bot[] = selectedBots.map((persistentBot, index) => {
     const angle = (index / BOT_COUNT) * Math.PI * 2;
-    return clonePersistentBotForMatch(
+    const bot = clonePersistentBotForMatch(
       persistentBot,
       MAP_CENTER + Math.cos(angle) * SPAWN_RADIUS,
       MAP_CENTER + Math.sin(angle) * SPAWN_RADIUS,
     );
+    if (carryOverBotId && persistentBot.id === carryOverBotId) {
+      bot.carriedCredits = Math.max(0, Math.floor(carryOverCredits));
+    }
+    return bot;
   });
 
   const loot = createInitialLoot(LOOT_COUNT + 5, { x: MAP_CENTER, y: MAP_CENTER }, LOOT_ZONE_RADIUS * 1.65, zones, rng);
@@ -38,8 +42,11 @@ export function createMatch(carryOverBotId?: string): MatchState {
     loot,
     zones,
     mapEvents: [],
+    arenaEvents: [],
+    narrativeMoments: [],
     creatures: [],
     learningEvents: [],
+    matchEvents: [],
     events: [
       {
         id: 1,
@@ -53,6 +60,17 @@ export function createMatch(carryOverBotId?: string): MatchState {
     winnerId: null,
     nextEventId: 2,
     eventDebounce: {},
+    matchEventState: {
+      firstBloodEmitted: false,
+      lowHpBotIds: {},
+      killStreaks: {},
+      lastKillAtMs: 0,
+      lastArenaEventAtMs: -Infinity,
+      firstArenaEventEmitted: false,
+      suddenDeathStarted: false,
+      eventCounts: {},
+      lastNarrativeByKey: {},
+    },
     finalized: false,
   };
 }

@@ -175,6 +175,7 @@ export type Bot = {
   biomeTimeMs: Partial<Record<BiomeType, number>>;
   weaponKills: Record<string, number>;
   thoughts: BotThought[];
+  carriedCredits: number;
 };
 
 export type InfluenceType = "aggression" | "defense" | "revenge" | "reveal";
@@ -246,7 +247,20 @@ export type ToolLootItem = {
   item: EquipmentItem;
 };
 
-export type LootItem = WeaponLootItem | MedkitLootItem | ArmorLootItem | ToolLootItem;
+export type CreditLootItem = {
+  id: string;
+  x: number;
+  y: number;
+  type: "credits";
+  name: string;
+  category: "credits";
+  rarity: "common" | "uncommon" | "rare" | "legendary";
+  preferredBiomes?: BiomeType[];
+  effects: Record<string, never>;
+  amount: number;
+};
+
+export type LootItem = WeaponLootItem | MedkitLootItem | ArmorLootItem | ToolLootItem | CreditLootItem;
 
 export type Point = {
   x: number;
@@ -257,12 +271,35 @@ export type GameEvent = {
   id: number;
   timeMs: number;
   message: string;
-  kind?: "damage" | "kill" | "alliance" | "betrayal" | "follow" | "avoid" | "trust" | "loot" | "winner" | "system" | "player";
+  kind?: "damage" | "kill" | "alliance" | "betrayal" | "follow" | "avoid" | "trust" | "loot" | "sponsor" | "winner" | "system" | "player";
   botId?: string;
   targetId?: string;
   x?: number;
   y?: number;
   label?: string;
+};
+
+export type MatchEventType =
+  | "kill"
+  | "first_blood"
+  | "kill_streak"
+  | "low_hp"
+  | "near_death_escape"
+  | "weapon_pickup"
+  | "sponsor_drop"
+  | "arena_event"
+  | "narrative"
+  | "match_winner";
+
+export type MatchEvent = {
+  id: string;
+  type: MatchEventType;
+  timestamp: number;
+  botId?: string;
+  targetBotId?: string;
+  message: string;
+  importance: number;
+  metadata?: Record<string, unknown>;
 };
 
 export type BetType = "winner" | "top3" | "mostKills" | "firstEliminated";
@@ -292,7 +329,10 @@ export type Nudge = {
 };
 
 export type PlayerState = {
+  accountId: string;
+  accountName: string;
   credits: number;
+  favoriteBotIds: string[];
   draftedBotIds: string[];
   bets: Bet[];
   betHistory: Bet[];
@@ -300,6 +340,7 @@ export type PlayerState = {
   stats: {
     totalBetsPlaced: number;
     totalBetWinnings: number;
+    totalSponsorshipsSent: number;
     totalNudgesUsed: number;
     biggestPayout: number;
   };
@@ -340,16 +381,56 @@ export type MatchState = {
   loot: LootItem[];
   zones: MapZone[];
   mapEvents: MapEvent[];
+  arenaEvents: ArenaEvent[];
+  narrativeMoments: NarrativeMoment[];
   creatures: Creature[];
   learningEvents: string[];
   events: GameEvent[];
+  matchEvents: MatchEvent[];
   historyEvents: GameEvent[];
   elapsedMs: number;
   ended: boolean;
   winnerId: string | null;
   nextEventId: number;
   eventDebounce: Record<string, number>;
+  matchEventState: {
+    firstBloodEmitted: boolean;
+    lowHpBotIds: Record<string, true>;
+    killStreaks: Record<string, number>;
+    lastKillAtMs: number;
+    lastArenaEventAtMs: number;
+    firstArenaEventEmitted: boolean;
+    suddenDeathStarted: boolean;
+    eventCounts: Partial<Record<ArenaEventType, number>>;
+    lastNarrativeByKey: Record<string, number>;
+  };
   finalized: boolean;
+};
+
+export type ArenaEventType = "monster_spawn" | "rare_loot_drop" | "danger_zone" | "bounty_target" | "sudden_death";
+
+export type ArenaEvent = {
+  id: string;
+  type: ArenaEventType;
+  title: string;
+  description: string;
+  location?: { x: number; z: number };
+  regionName?: string;
+  startedAt: number;
+  durationMs?: number;
+  severity?: "minor" | "major" | "critical";
+  affectedBotIds?: string[];
+};
+
+export type NarrativeMoment = {
+  id: string;
+  title: string;
+  description?: string;
+  severity: "info" | "danger" | "epic";
+  createdAt: number;
+  durationMs: number;
+  relatedBotIds?: string[];
+  location?: { x: number; z: number };
 };
 
 export type MapEvent = {
@@ -373,4 +454,6 @@ export type Creature = {
   y: number;
   targetBotId?: string;
   lastAttackAt: number;
+  arenaEventId?: string;
+  expiresAtMs?: number;
 };

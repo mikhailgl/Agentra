@@ -9,6 +9,7 @@ const LOOT_COLORS: Record<ArenaLootView["type"], string> = {
   medkit: "#ef4444",
   armor: "#60a5fa",
   tool: "#22c55e",
+  credits: "#facc15",
 };
 
 export function LootPickup({ loot }: { loot: ArenaLootView }) {

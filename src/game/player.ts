@@ -1,8 +1,10 @@
+import { CONTEST_ENTRY_FEE } from "./constants";
 import type { Bet, BetResolution, BetType, Bot, MatchState, Nudge, PlayerState } from "./types";
 
 const PLAYER_STORAGE_KEY = "ai-battle:player-state:v1";
 const STARTING_CREDITS = 1000;
 export const MIN_BET_AMOUNT = 25;
+export const BOT_CONTEST_ENTRY_FEE = CONTEST_ENTRY_FEE;
 export const DRAFT_COST = 300;
 export const MAX_DRAFTED_BOTS = 5;
 export const MAX_NUDGES_PER_MATCH = 3;
@@ -29,6 +31,10 @@ export function loadPlayerState(): PlayerState {
   }
 }
 
+export function getPlayerState(): PlayerState {
+  return loadPlayerState();
+}
+
 export function savePlayerState(state: PlayerState): void {
   if (typeof window === "undefined") {
     return;
@@ -36,18 +42,43 @@ export function savePlayerState(state: PlayerState): void {
   window.localStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(normalizePlayerState(state)));
 }
 
-export function spendCredits(state: PlayerState, amount: number): PlayerState | null {
-  if (!Number.isFinite(amount) || amount <= 0 || state.credits < amount) {
+export function addCredits(amount: number): PlayerState {
+  const state = getPlayerState();
+  const nextState = awardCredits(state, amount);
+  savePlayerState(nextState);
+  return nextState;
+}
+
+export function canAfford(amount: number): boolean {
+  const creditAmount = normalizeCreditAmount(amount);
+  return creditAmount !== null && getPlayerState().credits >= creditAmount;
+}
+
+export function spendCredits(amount: number): PlayerState | null;
+export function spendCredits(state: PlayerState, amount: number): PlayerState | null;
+export function spendCredits(stateOrAmount: PlayerState | number, maybeAmount?: number): PlayerState | null {
+  const state = typeof stateOrAmount === "number" ? getPlayerState() : stateOrAmount;
+  const rawAmount = typeof stateOrAmount === "number" ? stateOrAmount : maybeAmount;
+  const amount = normalizeCreditAmount(rawAmount);
+  if (amount === null) {
     return null;
   }
-  return { ...state, credits: state.credits - amount };
+  if (state.credits < amount) {
+    return null;
+  }
+  const nextState = { ...state, credits: state.credits - amount };
+  if (typeof stateOrAmount === "number") {
+    savePlayerState(nextState);
+  }
+  return nextState;
 }
 
 export function awardCredits(state: PlayerState, amount: number): PlayerState {
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const creditAmount = normalizeCreditAmount(amount);
+  if (creditAmount === null) {
     return state;
   }
-  return { ...state, credits: state.credits + amount };
+  return { ...state, credits: state.credits + creditAmount };
 }
 
 export function draftBot(state: PlayerState, botId: string): PlayerState | null {
@@ -212,7 +243,10 @@ export function getBetTypeLabel(type: BetType): string {
 
 function createDefaultPlayerState(): PlayerState {
   return {
+    accountId: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    accountName: "Guest account",
     credits: STARTING_CREDITS,
+    favoriteBotIds: [],
     draftedBotIds: [],
     bets: [],
     betHistory: [],
@@ -220,6 +254,7 @@ function createDefaultPlayerState(): PlayerState {
     stats: {
       totalBetsPlaced: 0,
       totalBetWinnings: 0,
+      totalSponsorshipsSent: 0,
       totalNudgesUsed: 0,
       biggestPayout: 0,
     },
@@ -228,8 +263,13 @@ function createDefaultPlayerState(): PlayerState {
 
 function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
   const fallback = createDefaultPlayerState();
+  const accountId = typeof state.accountId === "string" && state.accountId ? state.accountId : fallback.accountId;
+  const accountName = typeof state.accountName === "string" && state.accountName.trim() ? state.accountName.trim().slice(0, 32) : fallback.accountName;
   return {
+    accountId,
+    accountName,
     credits: Number.isFinite(state.credits) ? Math.max(0, Math.floor(state.credits ?? STARTING_CREDITS)) : fallback.credits,
+    favoriteBotIds: Array.isArray(state.favoriteBotIds) ? [...new Set(state.favoriteBotIds.filter(Boolean))] : [],
     draftedBotIds: Array.isArray(state.draftedBotIds) ? [...new Set(state.draftedBotIds.filter(Boolean))].slice(0, MAX_DRAFTED_BOTS) : [],
     bets: Array.isArray(state.bets) ? state.bets.filter(isValidBet).map(normalizeBet) : [],
     betHistory: Array.isArray(state.betHistory) ? state.betHistory.filter(isValidBet).map(normalizeBet).slice(0, 80) : [],
@@ -239,10 +279,19 @@ function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
       ...state.stats,
       totalBetsPlaced: Math.max(0, Math.floor(state.stats?.totalBetsPlaced ?? 0)),
       totalBetWinnings: Math.max(0, Math.floor(state.stats?.totalBetWinnings ?? 0)),
+      totalSponsorshipsSent: Math.max(0, Math.floor(state.stats?.totalSponsorshipsSent ?? 0)),
       totalNudgesUsed: Math.max(0, Math.floor(state.stats?.totalNudgesUsed ?? 0)),
       biggestPayout: Math.max(0, Math.floor(state.stats?.biggestPayout ?? 0)),
     },
   };
+}
+
+function normalizeCreditAmount(amount: number | undefined): number | null {
+  if (amount === undefined || !Number.isFinite(amount)) {
+    return null;
+  }
+  const creditAmount = Math.floor(amount);
+  return creditAmount > 0 ? creditAmount : null;
 }
 
 function normalizeBet(bet: Bet): Bet {

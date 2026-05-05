@@ -3,16 +3,20 @@ import {
   VISIBLE_ENEMY_RANGE,
   WANDER_TARGET_RADIUS,
 } from "./constants";
+import { getActiveDangerZoneEscapeTarget, getBountyTargetId, isPointInActiveDangerZone, isSuddenDeathActive } from "./arenaEvents";
 import { getBiomeAt } from "./biomes";
 import { distance, randomPointInCircle } from "./math";
 import { createRng } from "./random";
 import { areAllied, getRelationship } from "./relationships";
 import { evaluateSocialDecision, shouldRefuseAttackForTrust } from "./socialAI";
 import { getTraitModifier } from "./traits";
-import type { Bot, LootItem, MatchState, Point } from "./types";
+import type { Bot, Creature, LootItem, MatchState, Point } from "./types";
 
 export type BotDecision =
   | { action: "flee"; target: Bot }
+  | { action: "flee_creature"; target: Creature }
+  | { action: "attack_creature"; target: Creature }
+  | { action: "escape_zone"; target: Point; reason: string }
   | { action: "seek_loot"; target: LootItem }
   | { action: "attack"; target: Bot }
   | { action: "chase"; target: Bot }
@@ -25,6 +29,22 @@ export type BotDecision =
   | { action: "wander"; target: Point };
 
 export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
+  const escapeTarget = getActiveDangerZoneEscapeTarget(match, bot);
+  if (escapeTarget) {
+    bot.behavior = "fleeing";
+    return { action: "escape_zone", target: escapeTarget, reason: "danger_zone" };
+  }
+
+  const nearestCreature = findNearestCreature(bot, match);
+  if (nearestCreature && distance(bot, nearestCreature) <= getCreatureThreatRange(bot)) {
+    if (bot.inventory.weapon && bot.health > 58 && bot.psychology.aggression + bot.psychology.riskTolerance > 1.18) {
+      bot.behavior = "attacking";
+      return { action: "attack_creature", target: nearestCreature };
+    }
+    bot.behavior = "fleeing";
+    return { action: "flee_creature", target: nearestCreature };
+  }
+
   const nearestEnemy = findNearestEnemy(bot, match);
   const preferredEnemy = findInfluencedEnemy(bot, match) ?? findPreferredEnemy(bot, match);
   const enemy = preferredEnemy ?? nearestEnemy;
@@ -38,7 +58,7 @@ export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
     return social;
   }
 
-  if (social.action === "avoid") {
+  if (social.action === "avoid" && !shouldForceEndgamePressure(bot, livingCount, match)) {
     bot.behavior = "fleeing";
     return social;
   }
@@ -48,7 +68,7 @@ export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
     return social;
   }
 
-  if (nearestEnemy && shouldFlee(bot, nearestEnemy, livingCount)) {
+  if (nearestEnemy && shouldFlee(bot, nearestEnemy, livingCount, match)) {
     bot.behavior = "fleeing";
     return { action: "flee", target: nearestEnemy };
   }
@@ -92,6 +112,11 @@ function findNearestEnemy(bot: Bot, match: MatchState): Bot | null {
 
 function findPreferredEnemy(bot: Bot, match: MatchState): Bot | null {
   const enemies = match.bots.filter((candidate) => candidate.alive && candidate.id !== bot.id && !areAllied(bot, candidate, match.elapsedMs));
+  const bountyTargetId = getBountyTargetId(match);
+  const bountyTarget = bountyTargetId ? enemies.find((candidate) => candidate.id === bountyTargetId && distance(bot, candidate) <= VISIBLE_ENEMY_RANGE * 1.25) : null;
+  if (bountyTarget) {
+    return bountyTarget;
+  }
 
   if (bot.personality === "Hunter") {
     return enemies
@@ -130,15 +155,27 @@ function findInfluencedEnemy(bot: Bot, match: MatchState): Bot | null {
 }
 
 function findNearestLoot(bot: Bot, match: MatchState): LootItem | null {
-  return [...match.loot].sort((a, b) => getLootDesire(bot, b) / Math.max(80, distance(bot, b)) - getLootDesire(bot, a) / Math.max(80, distance(bot, a)))[0] ?? null;
+  return match.loot
+    .filter((item) => getLootDesire(bot, item, match) > 0)
+    .sort((a, b) => getLootDesire(bot, b, match) / Math.max(80, distance(bot, b)) - getLootDesire(bot, a, match) / Math.max(80, distance(bot, a)))[0] ?? null;
 }
 
-function shouldFlee(bot: Bot, enemy: Bot, livingCount: number): boolean {
+function findNearestCreature(bot: Bot, match: MatchState): Creature | null {
+  return (match.creatures ?? [])
+    .filter((creature) => creature.health > 0)
+    .sort((a, b) => distance(bot, a) - distance(bot, b))[0] ?? null;
+}
+
+function shouldFlee(bot: Bot, enemy: Bot, livingCount: number, match: MatchState): boolean {
   const enemyDistance = distance(bot, enemy);
   const relationship = getRelationship(bot, enemy.id);
-  const aggressionPressure = getInfluenceStrength(bot, "aggression");
+  const aggressionPressure = getInfluenceStrength(bot, "aggression") + (isSuddenDeathActive(match) ? 0.22 : 0);
   const defensePressure = getInfluenceStrength(bot, "defense");
   const fleeBias = 1 + defensePressure * 0.5 - aggressionPressure * 0.45;
+
+  if (shouldForceEndgamePressure(bot, livingCount, match)) {
+    return false;
+  }
 
   if (bot.personality === "Berserker") {
     return bot.health < 18 + defensePressure * 12 && enemyDistance <= FLEE_ENEMY_RANGE * (0.75 + relationship.fear * 0.4) * fleeBias;
@@ -159,12 +196,20 @@ function shouldFlee(bot: Bot, enemy: Bot, livingCount: number): boolean {
 }
 
 function shouldSeekLoot(bot: Bot, loot: LootItem): boolean {
-  if (!bot.inventory.weapon) {
+  if (loot.rarity === "legendary" || loot.rarity === "rare") {
     return true;
   }
 
+  if (!bot.inventory.weapon) {
+    return loot.type !== "medkit" || bot.health < 82 || bot.personality === "Coward";
+  }
+
   if (loot.type === "medkit") {
-    return bot.health <= 78 || bot.personality === "Scavenger";
+    return bot.health < 82 || bot.personality === "Coward";
+  }
+
+  if (loot.type === "credits") {
+    return bot.personality === "Scavenger" || bot.psychology.opportunism + bot.psychology.riskTolerance > 0.82;
   }
 
   if (bot.personality !== "Scavenger") {
@@ -175,9 +220,15 @@ function shouldSeekLoot(bot: Bot, loot: LootItem): boolean {
 }
 
 function getChaseRange(bot: Bot, livingCount: number, match: MatchState): number {
-  const attackBias = 1 + getInfluenceStrength(bot, "aggression") * 0.5 + getInfluenceStrength(bot, "revenge") * 0.38 - getInfluenceStrength(bot, "defense") * 0.35;
+  const attackBias =
+    1 +
+    getInfluenceStrength(bot, "aggression") * 0.5 +
+    getInfluenceStrength(bot, "revenge") * 0.38 -
+    getInfluenceStrength(bot, "defense") * 0.35 +
+    (isSuddenDeathActive(match) ? 0.28 : 0);
   const biome = getBiomeAt(bot, match.zones);
   const visibility = 1 + (biome.modifiers.visibility ?? 0) + ((bot.affinities.biomes[biome.id] ?? 1) - 1) * 0.12;
+  if (livingCount <= 2 && bot.inventory.weapon) return VISIBLE_ENEMY_RANGE * 0.95 * attackBias * visibility;
   if (bot.personality === "Berserker") return VISIBLE_ENEMY_RANGE * 1.35 * attackBias * visibility;
   if (bot.personality === "Hunter") return VISIBLE_ENEMY_RANGE * 1.2 * attackBias * visibility;
   if (bot.personality === "Coward") return VISIBLE_ENEMY_RANGE * 0.45 * attackBias * visibility;
@@ -185,16 +236,31 @@ function getChaseRange(bot: Bot, livingCount: number, match: MatchState): number
   return VISIBLE_ENEMY_RANGE * attackBias * visibility;
 }
 
+function shouldForceEndgamePressure(bot: Bot, livingCount: number, match: MatchState): boolean {
+  if (livingCount > 2 || !bot.inventory.weapon || bot.health <= 35) {
+    return false;
+  }
+
+  return match.elapsedMs > 45_000;
+}
+
 function getInfluenceStrength(bot: Bot, type: "aggression" | "defense" | "revenge"): number {
   return Math.max(0, ...(bot.activeInfluences ?? []).filter((influence) => influence.type === type).map((influence) => influence.strength));
 }
 
-function getLootDesire(bot: Bot, item: LootItem): number {
+function getCreatureThreatRange(bot: Bot): number {
+  return bot.health < 45 ? 185 : 125;
+}
+
+function getLootDesire(bot: Bot, item: LootItem, match?: MatchState): number {
+  const dangerPenalty = match && isPointInActiveDangerZone(match, item) ? 0.18 : 1;
   const rarity = item.rarity === "legendary" ? 5 : item.rarity === "rare" ? 3 : item.rarity === "uncommon" ? 2 : 1;
-  if (item.type === "medkit") return bot.health < 45 ? 8 : bot.health < 75 ? 4 : 0.8;
-  if (item.type === "weapon") return item.weapon.damage * (0.4 + bot.psychology.aggression * 0.35) + rarity + ((bot.affinities.weapons[item.weapon.name] ?? 1) - 1) * 4;
-  if (item.type === "armor") return (item.effects.defense ?? 0) * (60 + bot.psychology.selfPreservation * 30) + rarity;
-  return ((item.effects.stealth ?? 0) + (item.effects.trapPower ?? 0)) * (45 + bot.psychology.opportunism * 30) + rarity;
+  const rareEventBonus = item.rarity === "legendary" ? 26 : item.rarity === "rare" ? 12 : 0;
+  if (item.type === "medkit") return (bot.health < 45 ? 8 : bot.health < 75 ? 4 : bot.health < 82 || bot.personality === "Coward" ? 0.8 : 0) * dangerPenalty;
+  if (item.type === "weapon") return (item.weapon.damage * (0.4 + bot.psychology.aggression * 0.35) + rarity + rareEventBonus + ((bot.affinities.weapons[item.weapon.name] ?? 1) - 1) * 4) * dangerPenalty;
+  if (item.type === "armor") return ((item.effects.defense ?? 0) * (60 + bot.psychology.selfPreservation * 30) + rarity + rareEventBonus) * dangerPenalty;
+  if (item.type === "credits") return (item.amount * (0.08 + bot.psychology.opportunism * 0.08) + rarity + rareEventBonus) * dangerPenalty;
+  return (((item.effects.stealth ?? 0) + (item.effects.trapPower ?? 0)) * (45 + bot.psychology.opportunism * 30) + rarity + rareEventBonus) * dangerPenalty;
 }
 
 function hashSeed(input: string): number {

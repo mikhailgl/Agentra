@@ -105,6 +105,7 @@ export function clonePersistentBotForMatch(bot: PersistentBot, x: number, y: num
     biomeTimeMs: {},
     weaponKills: {},
     thoughts: [],
+    carriedCredits: 0,
   };
 }
 
