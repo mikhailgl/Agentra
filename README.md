@@ -79,20 +79,33 @@ Production branch convention:
 
 No Supabase Storage bucket is required right now because the current app does not upload or persist files/assets. Add Storage later if uploads become product state.
 
-### Render Backend
+### Render Deployment
 
 1. Connect the GitHub repo in Render.
-2. Use the committed `render.yaml` Blueprint, or create a Web Service manually with:
-   - Build command: `npm install && npm run build --workspace backend`
+2. Use the committed `render.yaml` Blueprint. It creates:
+   - `botarena-backend`: Node web service for the Express API.
+   - `botarena-frontend`: static Vite site served by Render.
+3. During Blueprint creation, set these backend secret environment variables when Render prompts for them:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+4. The Blueprint assumes these default public URLs:
+   - Frontend: `https://botarena-frontend.onrender.com`
+   - Backend: `https://botarena-backend.onrender.com`
+5. If Render assigns different service hostnames or you add custom domains, update:
+   - Backend `CORS_ORIGINS` to the final frontend URL.
+   - Frontend `VITE_API_BASE_URL` to the final backend URL.
+
+To create only the backend manually instead of using the Blueprint, create a Web Service with:
+   - Build command: `npm ci --include=dev && npm run build --workspace backend`
    - Start command: `npm run start --workspace backend`
    - Health check path: `/health`
-3. Set these Render environment variables:
+Then set these Render environment variables:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `CORS_ORIGINS`
-   - `CORS_ORIGIN_SUFFIXES=vercel.app`
+   - `CORS_ORIGIN_SUFFIXES=vercel.app,onrender.com`
    - `NODE_ENV=production`
-4. Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins, for example:
+Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins, for example:
 
 ```text
 https://your-production-app.vercel.app,https://your-preview-app.vercel.app,http://localhost:5173
