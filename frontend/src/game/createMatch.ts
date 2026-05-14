@@ -10,15 +10,23 @@ import { createInitialLoot } from "./loot";
 import { loadPersistentBots, clonePersistentBotForMatch } from "./persistence";
 import { takeQueuedEntrants } from "./queue";
 import { createRng } from "./random";
-import type { Bot, MatchState } from "./types";
+import type { Bot, MatchState, PersistentBot } from "./types";
 
 export function createMatch(carryOverBotId?: string, carryOverCredits = 0): MatchState {
+  const pool = loadPersistentBots();
+  return createMatchFromPool(pool, takeQueuedEntrants(pool, carryOverBotId).entrants, carryOverBotId, carryOverCredits);
+}
+
+export function createMatchFromPool(
+  pool: PersistentBot[],
+  selectedBots: PersistentBot[],
+  carryOverBotId?: string,
+  carryOverCredits = 0,
+): MatchState {
   const seed = Date.now() % 1_000_000_000;
   const rng = createRng(seed);
-  const pool = loadPersistentBots();
   const zones = createMapZones();
   const carryOverBot = carryOverBotId ? pool.find((bot) => bot.id === carryOverBotId) : undefined;
-  const selectedBots = takeQueuedEntrants(pool, carryOverBotId).entrants;
   const bots: Bot[] = selectedBots.map((persistentBot, index) => {
     const angle = (index / BOT_COUNT) * Math.PI * 2;
     const bot = clonePersistentBotForMatch(

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { formatTime } from "../format";
-import { BOT_CONTEST_ENTRY_FEE } from "../game/player";
+import { BOT_CONTEST_ENTRY_FEE, CUSTOM_BOT_CREATION_COST } from "../game/player";
 import { getTraitLabels } from "../game/traits";
 import type { BotAffinities, PersistentBot, PlayerState, Psychology } from "../game/types";
 import { CustomBotCreator } from "./CustomBotCreator";
@@ -28,6 +28,7 @@ export function LudusView({
   onBackToArena,
   onCreateBot,
   onEnterBot,
+  onAddCredits,
   onUpdateDoctrine,
 }: {
   bots: PersistentBot[];
@@ -37,6 +38,7 @@ export function LudusView({
   onBackToArena: () => void;
   onCreateBot: (build: CustomBotBuild, enterContest: boolean) => void;
   onEnterBot: (botId: string) => void;
+  onAddCredits: () => void;
   onUpdateDoctrine: (botId: string, instruction: string) => void;
 }) {
   const ownedBots = useMemo(() => bots.filter((bot) => bot.custom), [bots]);
@@ -55,10 +57,10 @@ export function LudusView({
           <p>Private doctrine changes how your custom fighters behave across future matches.</p>
         </div>
         <div className="ludus-hero-actions">
-          <div className="credit-tile">
+          <button type="button" className="credit-tile" onClick={onAddCredits} title="Add 1,000 credits">
             <span>Credits</span>
             <strong>{player.credits.toLocaleString()}</strong>
-          </div>
+          </button>
           <button type="button" className="secondary-button" onClick={onBackToArena}>
             Arena
           </button>
@@ -131,7 +133,7 @@ export function LudusView({
       {showCreator && (
         <CustomBotCreator
           credits={player.credits}
-          entryFee={BOT_CONTEST_ENTRY_FEE}
+          creationCost={CUSTOM_BOT_CREATION_COST}
           onClose={() => setShowCreator(false)}
           onCreate={(build, enterContest) => {
             onCreateBot(build, enterContest);

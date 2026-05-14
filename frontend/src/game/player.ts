@@ -6,6 +6,7 @@ const PLAYER_STORAGE_KEY = "ai-battle:player-state:v1";
 const STARTING_CREDITS = 1000;
 export const MIN_BET_AMOUNT = 25;
 export const BOT_CONTEST_ENTRY_FEE = CONTEST_ENTRY_FEE;
+export const CUSTOM_BOT_CREATION_COST = CONTEST_ENTRY_FEE;
 export const DRAFT_COST = 300;
 export const MAX_DRAFTED_BOTS = 5;
 export const MAX_NUDGES_PER_MATCH = 3;

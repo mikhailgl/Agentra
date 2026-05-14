@@ -14,12 +14,12 @@ const STYLES: Style[] = ["aggressive", "defensive", "opportunistic", "stealthy",
 
 export function CustomBotCreator({
   credits,
-  entryFee,
+  creationCost,
   onClose,
   onCreate,
 }: {
   credits: number;
-  entryFee: number;
+  creationCost: number;
   onClose: () => void;
   onCreate: (build: { name: string; baseStats: BaseStats; psychology: Psychology; traits: string[]; affinities: BotAffinities; tacticalInstruction: string }, enterContest: boolean) => void;
 }) {
@@ -40,8 +40,8 @@ export function CustomBotCreator({
   });
   const spent = Object.values(stats).reduce((sum, value) => sum + value, 0);
   const remaining = POINTS - spent;
-  const valid = name.trim().length >= 2 && remaining === 0 && Object.values(stats).every((value) => value >= 1 && value <= 10);
-  const canEnterContest = credits >= entryFee;
+  const valid = remaining === 0 && Object.values(stats).every((value) => value >= 1 && value <= 10);
+  const canCreate = credits >= creationCost;
   const summary = useMemo(() => interpretBuild(stats, archetype, style, preferredBiome, preferredWeaponType, instruction), [archetype, instruction, preferredBiome, preferredWeaponType, stats, style]);
   const buildBot = () => summary.build(name.trim() || "Custom Bot");
 
@@ -60,7 +60,7 @@ export function CustomBotCreator({
         <div className="creator-grid">
           <label>
             Name
-            <input value={name} onChange={(event) => setName(event.target.value)} maxLength={24} />
+            <input value={name} onChange={(event) => setName(event.target.value)} maxLength={24} placeholder="Custom Bot" />
           </label>
           <label>
             Archetype
@@ -111,11 +111,11 @@ export function CustomBotCreator({
           <p>{summary.text}</p>
         </div>
         <div className="creator-actions">
-          <button type="button" className="secondary-button" disabled={!valid} title={valid ? "" : "Spend exactly 35 points and provide a name"} onClick={() => onCreate(buildBot(), false)}>
-            Create for free
+          <button type="button" className="secondary-button" disabled={!valid || !canCreate} title={!valid ? "Spend exactly 35 points" : canCreate ? "" : `Need ${creationCost} credits to create`} onClick={() => onCreate(buildBot(), false)}>
+            Create ({creationCost} credits)
           </button>
-          <button type="button" disabled={!valid || !canEnterContest} title={!valid ? "Spend exactly 35 points and provide a name" : canEnterContest ? "" : `Need ${entryFee} credits to enter`} onClick={() => onCreate(buildBot(), true)}>
-            Enter contest ({entryFee} credits)
+          <button type="button" disabled={!valid || !canCreate} title={!valid ? "Spend exactly 35 points" : canCreate ? "" : `Need ${creationCost} credits to create and enter`} onClick={() => onCreate(buildBot(), true)}>
+            Create and enter ({creationCost} credits)
           </button>
         </div>
       </section>

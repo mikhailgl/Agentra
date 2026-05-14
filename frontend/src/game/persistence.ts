@@ -183,7 +183,7 @@ export function updatePersistentBotDoctrine(botId: string, instruction: string):
   return nextPool;
 }
 
-function createDefaultPool(): PersistentBot[] {
+export function createDefaultPool(): PersistentBot[] {
   const rng = createRng(91_337);
   return Array.from({ length: PERSISTENT_BOT_COUNT }, (_, index) => {
     const psychology = createPsychology(rng);

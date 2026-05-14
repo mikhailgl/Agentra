@@ -49,6 +49,21 @@ button:hover {
   position: relative;
 }
 
+.arena-loading {
+  align-items: center;
+  background: #111713;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #dbe7dd;
+  display: flex;
+  font-size: 0.95rem;
+  font-weight: 800;
+  inset: 0;
+  justify-content: center;
+  letter-spacing: 0;
+  min-height: 560px;
+  position: absolute;
+}
+
 .canvas-header {
   align-items: center;
   display: flex;
@@ -581,7 +596,7 @@ textarea {
 .intro-overlay,
 .modal-backdrop {
   align-items: center;
-  background: rgba(5, 8, 6, 0.62);
+  background: rgba(5, 8, 6, 0.86);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -1563,9 +1578,19 @@ textarea {
   background: rgba(242, 196, 83, 0.1);
   border: 1px solid rgba(242, 196, 83, 0.28);
   border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
   display: grid;
   gap: 0.1rem;
+  font: inherit;
   padding: 0.58rem 0.72rem;
+  text-align: left;
+}
+
+.credit-tile:hover,
+.credit-tile:focus-visible {
+  background: rgba(242, 196, 83, 0.16);
+  border-color: rgba(242, 196, 83, 0.5);
 }
 
 .credit-tile strong {

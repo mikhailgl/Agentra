@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { ArenaService } from "./arenaService.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
 import { createSupabaseAdmin } from "./supabase.js";
@@ -7,6 +8,8 @@ import { createSupabaseAdmin } from "./supabase.js";
 const config = getConfig();
 const app = express();
 const repository = new GameStateRepository(createSupabaseAdmin(config));
+const arena = new ArenaService();
+arena.start();
 
 app.use(express.json({ limit: "2mb" }));
 app.use(
@@ -46,6 +49,28 @@ app.get("/api/state", async (request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get("/api/arena", (_request, response) => {
+  response.json(arena.getSnapshot());
+});
+
+app.post("/api/arena/toggle-pause", (_request, response) => {
+  response.json(arena.togglePause());
+});
+
+app.post("/api/arena/start-next", (_request, response) => {
+  response.json(arena.startNextMatch());
+});
+
+app.post("/api/arena/sponsor-drop", (request, response) => {
+  const { botId, kind } = request.body as { botId?: unknown; kind?: unknown };
+  if (typeof botId !== "string" || typeof kind !== "string") {
+    response.status(400).json({ error: "botId and kind are required" });
+    return;
+  }
+
+  response.json(arena.sponsorDrop(botId, kind));
 });
 
 app.put("/api/state", async (request, response, next) => {

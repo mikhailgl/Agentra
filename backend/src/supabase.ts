@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
+import type { WebSocketLikeConstructor } from "@supabase/realtime-js";
 import type { AppConfig } from "./config.js";
 
 export function createSupabaseAdmin(config: AppConfig) {
@@ -6,6 +8,9 @@ export function createSupabaseAdmin(config: AppConfig) {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+    },
+    realtime: {
+      transport: WebSocket as unknown as WebSocketLikeConstructor,
     },
   });
 }
