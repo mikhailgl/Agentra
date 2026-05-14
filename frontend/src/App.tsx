@@ -35,6 +35,8 @@ type CustomBotBuild = {
   tacticalInstruction: string;
 };
 
+const ARENA_POLL_MS = 350;
+
 function App() {
   const matchRef = useRef<MatchState | null>(null);
   const arenaStateRef = useRef<ArenaState | null>(null);
@@ -255,13 +257,23 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const clock = window.setInterval(() => forceClockSync((value) => value + 1), 250);
+    if (arenaState?.phase !== "intermission") {
+      return;
+    }
+
+    const clock = window.setInterval(() => forceClockSync((value) => value + 1), 1000);
     return () => window.clearInterval(clock);
-  }, []);
+  }, [arenaState?.phase]);
 
   useEffect(() => {
     let cancelled = false;
+    let requestInFlight = false;
     const sync = () => {
+      if (requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
       void loadArenaSnapshot()
         .then((snapshot) => {
           if (!cancelled && snapshot) {
@@ -270,11 +282,14 @@ function App() {
         })
         .catch((error) => {
           console.warn("Arena snapshot sync failed", error);
+        })
+        .finally(() => {
+          requestInFlight = false;
         });
     };
 
     sync();
-    const interval = window.setInterval(sync, 250);
+    const interval = window.setInterval(sync, ARENA_POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(interval);

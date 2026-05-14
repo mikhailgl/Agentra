@@ -10,6 +10,10 @@ const TICK_MS = 50;
 const MAX_DELTA_MS = 100;
 const MAX_BASIC_RESULTS = 10;
 const QUEUE_TARGET_SIZE = Math.max(BOT_COUNT * 2, PERSISTENT_BOT_COUNT);
+const MAX_PUBLIC_EVENTS = 24;
+const MAX_PUBLIC_MATCH_EVENTS = 24;
+const MAX_PUBLIC_THOUGHTS = 8;
+const MAX_PUBLIC_JOURNAL_ENTRIES = 6;
 
 export type ArenaSnapshot = {
   match: MatchState;
@@ -46,9 +50,9 @@ export class ArenaService {
 
   getSnapshot(): ArenaSnapshot {
     return {
-      match: cloneJson(this.match),
+      match: createPublicMatchSnapshot(this.match),
       arenaState: cloneJson(this.arenaState),
-      persistentBots: cloneJson(this.persistentBots),
+      persistentBots: this.persistentBots.map(createPublicPersistentBotSnapshot),
       arenaQueueIds: [...this.arenaQueueIds],
       basicResults: cloneJson(this.basicResults),
       serverTime: Date.now(),
@@ -210,6 +214,35 @@ export class ArenaService {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function createPublicMatchSnapshot(match: MatchState): MatchState {
+  return {
+    ...match,
+    bots: match.bots.map((bot) => {
+      const { relationships: _relationships, thoughts, ...publicBot } = bot;
+      return {
+        ...publicBot,
+        relationships: {},
+        thoughts: thoughts.slice(0, MAX_PUBLIC_THOUGHTS),
+      };
+    }),
+    events: match.events.slice(0, MAX_PUBLIC_EVENTS),
+    matchEvents: match.matchEvents.slice(0, MAX_PUBLIC_MATCH_EVENTS),
+    narrativeMoments: match.narrativeMoments.slice(0, 6),
+    historyEvents: [],
+    learningEvents: [],
+    eventDebounce: {},
+  };
+}
+
+function createPublicPersistentBotSnapshot(bot: PersistentBot): PersistentBot {
+  const { relationships: _relationships, journal, ...publicBot } = bot;
+  return {
+    ...publicBot,
+    relationships: {},
+    journal: journal?.slice(0, MAX_PUBLIC_JOURNAL_ENTRIES),
+  };
 }
 
 function hashSeed(input: string): number {
