@@ -18,9 +18,9 @@ const MAX_PUBLIC_JOURNAL_ENTRIES = 6;
 export type ArenaSnapshot = {
   match: MatchState;
   arenaState: ArenaState;
-  persistentBots: PersistentBot[];
-  arenaQueueIds: string[];
-  basicResults: BasicMatchResult[];
+  persistentBots?: PersistentBot[];
+  arenaQueueIds?: string[];
+  basicResults?: BasicMatchResult[];
   serverTime: number;
 };
 
@@ -48,15 +48,20 @@ export class ArenaService {
     this.timer.unref();
   }
 
-  getSnapshot(): ArenaSnapshot {
-    return {
+  getSnapshot(options: { includeRoster?: boolean } = {}): ArenaSnapshot {
+    const snapshot: ArenaSnapshot = {
       match: createPublicMatchSnapshot(this.match),
       arenaState: cloneJson(this.arenaState),
-      persistentBots: this.persistentBots.map(createPublicPersistentBotSnapshot),
-      arenaQueueIds: [...this.arenaQueueIds],
-      basicResults: cloneJson(this.basicResults),
       serverTime: Date.now(),
     };
+
+    if (options.includeRoster) {
+      snapshot.persistentBots = this.persistentBots.map(createPublicPersistentBotSnapshot);
+      snapshot.arenaQueueIds = [...this.arenaQueueIds];
+      snapshot.basicResults = cloneJson(this.basicResults);
+    }
+
+    return snapshot;
   }
 
   togglePause(): ArenaSnapshot {

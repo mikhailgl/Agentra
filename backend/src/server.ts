@@ -51,8 +51,8 @@ app.get("/api/state", async (request, response, next) => {
   }
 });
 
-app.get("/api/arena", (_request, response) => {
-  response.json(arena.getSnapshot());
+app.get("/api/arena", (request, response) => {
+  response.json(arena.getSnapshot({ includeRoster: request.query.includeRoster === "1" }));
 });
 
 app.post("/api/arena/toggle-pause", (_request, response) => {

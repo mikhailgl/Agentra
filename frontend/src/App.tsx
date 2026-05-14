@@ -36,6 +36,7 @@ type CustomBotBuild = {
 };
 
 const ARENA_POLL_MS = 350;
+const ROSTER_POLL_MS = 5_000;
 
 function App() {
   const matchRef = useRef<MatchState | null>(null);
@@ -77,13 +78,19 @@ function App() {
     arenaStateRef.current = snapshot.arenaState;
     setMatchView(snapshot.match);
     setArenaState(snapshot.arenaState);
-    setPersistentBots(snapshot.persistentBots);
-    setBasicResults(snapshot.basicResults);
-    setArenaQueue(
-      snapshot.arenaQueueIds
-        .map((id) => snapshot.persistentBots.find((bot) => bot.id === id))
-        .filter((bot): bot is PersistentBot => Boolean(bot)),
-    );
+    if (snapshot.persistentBots) {
+      setPersistentBots(snapshot.persistentBots);
+    }
+    if (snapshot.basicResults) {
+      setBasicResults(snapshot.basicResults);
+    }
+    if (snapshot.arenaQueueIds && snapshot.persistentBots) {
+      setArenaQueue(
+        snapshot.arenaQueueIds
+          .map((id) => snapshot.persistentBots?.find((bot) => bot.id === id))
+          .filter((bot): bot is PersistentBot => Boolean(bot)),
+      );
+    }
 
     if (snapshot.arenaState.phase === "intermission" && snapshot.match.ended) {
       if (postMatchSummaryMatchRef.current !== snapshot.arenaState.matchNumber) {
@@ -290,6 +297,37 @@ function App() {
 
     sync();
     const interval = window.setInterval(sync, ARENA_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [applyArenaSnapshot]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let requestInFlight = false;
+    const syncRoster = () => {
+      if (requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
+      void loadArenaSnapshot({ includeRoster: true })
+        .then((snapshot) => {
+          if (!cancelled && snapshot) {
+            applyArenaSnapshot(snapshot);
+          }
+        })
+        .catch((error) => {
+          console.warn("Arena roster snapshot sync failed", error);
+        })
+        .finally(() => {
+          requestInFlight = false;
+        });
+    };
+
+    syncRoster();
+    const interval = window.setInterval(syncRoster, ROSTER_POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(interval);

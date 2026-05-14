@@ -15,9 +15,9 @@ export type RemoteGameState = {
 export type ArenaSnapshot = {
   match: MatchState;
   arenaState: ArenaState;
-  persistentBots: PersistentBot[];
-  arenaQueueIds: string[];
-  basicResults: BasicMatchResult[];
+  persistentBots?: PersistentBot[];
+  arenaQueueIds?: string[];
+  basicResults?: BasicMatchResult[];
   serverTime: number;
 };
 
@@ -81,13 +81,14 @@ export function saveRemoteGameState(state: RemoteGameState): void {
   });
 }
 
-export async function loadArenaSnapshot(): Promise<ArenaSnapshot | null> {
+export async function loadArenaSnapshot(options: { includeRoster?: boolean } = {}): Promise<ArenaSnapshot | null> {
   const apiBaseUrl = getApiBaseUrl();
   if (!apiBaseUrl) {
     return null;
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/arena`);
+  const query = options.includeRoster ? "?includeRoster=1" : "";
+  const response = await fetch(`${apiBaseUrl}/api/arena${query}`);
   if (!response.ok) {
     throw new Error(`Failed to load arena snapshot: ${response.status}`);
   }
