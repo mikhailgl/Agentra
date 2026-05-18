@@ -25,7 +25,7 @@ import { enqueueBotForArena, loadArenaQueue } from "./game/queue";
 import type { ArenaState, BasicMatchResult, BaseStats, BetType, BotAffinities, MatchState, PersistentBot, Psychology } from "./game/types";
 import type { SponsorDropKind } from "./game/simulation";
 import { toArenaViewModel } from "./lib/simulation/simulationTo3D";
-import type { CameraMode } from "./lib/simulation/types";
+import type { ArenaViewModel, CameraMode } from "./lib/simulation/types";
 
 type CustomBotBuild = {
   name: string;
@@ -36,7 +36,7 @@ type CustomBotBuild = {
   tacticalInstruction: string;
 };
 
-const ARENA_POLL_MS = 350;
+const ARENA_UI_SYNC_MS = 1_000;
 const ROSTER_POLL_MS = 5_000;
 
 function App() {
@@ -46,6 +46,7 @@ function App() {
 
   const [matchView, setMatchView] = useState<MatchState | null>(null);
   const [arenaState, setArenaState] = useState<ArenaState | null>(null);
+  const [visualArenaView, setVisualArenaView] = useState<ArenaViewModel | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow_action");
   const [cameraResetToken, setCameraResetToken] = useState(0);
@@ -68,6 +69,18 @@ function App() {
     () => (matchView ? toArenaViewModel(matchView, selectedBotId, [], []) : null),
     [matchView, selectedBotId],
   );
+
+  const renderedArenaView = useMemo(() => {
+    const baseArena = visualArenaView ?? arenaView;
+    if (!baseArena) return null;
+    return {
+      ...baseArena,
+      bots: baseArena.bots.map((bot) => ({
+        ...bot,
+        isSelected: bot.id === selectedBotId,
+      })),
+    };
+  }, [arenaView, selectedBotId, visualArenaView]);
 
   const queuedBots = useMemo(() => {
     const activeBotIds = new Set(matchView?.bots.map((bot) => bot.id) ?? []);
@@ -277,9 +290,11 @@ function App() {
     let cancelled = false;
     let loggedStreamError = false;
     const unsubscribe = subscribeToArenaStream({
-      onSnapshot(snapshot) {
+      onFrame(frame) {
         if (!cancelled) {
-          applyArenaSnapshot(snapshot);
+          setVisualArenaView(frame.arena);
+          setArenaState(frame.arenaState);
+          arenaStateRef.current = frame.arenaState;
         }
       },
       onError(error) {
@@ -296,7 +311,10 @@ function App() {
         unsubscribe();
       };
     }
+  }, []);
 
+  useEffect(() => {
+    let cancelled = false;
     let requestInFlight = false;
     const sync = () => {
       if (requestInFlight) return;
@@ -316,7 +334,7 @@ function App() {
     };
 
     sync();
-    const interval = window.setInterval(sync, ARENA_POLL_MS);
+    const interval = window.setInterval(sync, ARENA_UI_SYNC_MS);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
@@ -370,7 +388,7 @@ function App() {
     );
   }
 
-  if (!matchView || !arenaState || !arenaView) {
+  if (!matchView || !arenaState || !renderedArenaView) {
     return (
       <main className="app-shell">
         <section className="simulation-area">
@@ -397,7 +415,7 @@ function App() {
             </button>
           </nav>
           <ThreeArena
-            arena={arenaView}
+            arena={renderedArenaView}
             cameraMode={cameraMode}
             selectedBotId={selectedBotId}
             cameraResetToken={cameraResetToken}

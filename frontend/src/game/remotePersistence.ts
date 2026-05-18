@@ -1,5 +1,6 @@
 import type { ArenaState, BasicMatchResult, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
+import type { ArenaViewModel } from "../lib/simulation/types";
 
 const CLIENT_ID_KEY = "ai-battle:client-id:v1";
 let remoteSyncEnabled = false;
@@ -18,6 +19,13 @@ export type ArenaSnapshot = {
   persistentBots?: PersistentBot[];
   arenaQueueIds?: string[];
   basicResults?: BasicMatchResult[];
+  serverTime: number;
+};
+
+export type ArenaStreamFrame = {
+  matchId: string;
+  arena: ArenaViewModel;
+  arenaState: ArenaState;
   serverTime: number;
 };
 
@@ -97,10 +105,10 @@ export async function loadArenaSnapshot(options: { includeRoster?: boolean } = {
 }
 
 export function subscribeToArenaStream({
-  onSnapshot,
+  onFrame,
   onError,
 }: {
-  onSnapshot: (snapshot: ArenaSnapshot) => void;
+  onFrame: (frame: ArenaStreamFrame) => void;
   onError?: (error: Event) => void;
 }): (() => void) | null {
   const apiBaseUrl = getApiBaseUrl();
@@ -110,7 +118,7 @@ export function subscribeToArenaStream({
 
   const source = new EventSource(`${apiBaseUrl}/api/arena/stream`);
   const handleSnapshot = (event: MessageEvent<string>) => {
-    onSnapshot(JSON.parse(event.data) as ArenaSnapshot);
+    onFrame(JSON.parse(event.data) as ArenaStreamFrame);
   };
   source.addEventListener("arena", handleSnapshot);
   source.onerror = (event) => {

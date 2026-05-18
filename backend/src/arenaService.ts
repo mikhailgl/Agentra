@@ -4,6 +4,8 @@ import { createDefaultPool } from "../../frontend/src/game/persistence.js";
 import { createRng, shuffle } from "../../frontend/src/game/random.js";
 import { spawnSponsorDrop, stepSimulation, type SponsorDropKind } from "../../frontend/src/game/simulation.js";
 import type { ArenaState, BasicMatchResult, MatchState, PersistentBot } from "../../frontend/src/game/types.js";
+import { toArenaViewModel } from "../../frontend/src/lib/simulation/simulationTo3D.js";
+import type { ArenaViewModel } from "../../frontend/src/lib/simulation/types.js";
 
 const INTERMISSION_MS = 5_000;
 const TICK_MS = 50;
@@ -21,6 +23,13 @@ export type ArenaSnapshot = {
   persistentBots?: PersistentBot[];
   arenaQueueIds?: string[];
   basicResults?: BasicMatchResult[];
+  serverTime: number;
+};
+
+export type ArenaStreamFrame = {
+  matchId: string;
+  arena: ArenaViewModel;
+  arenaState: ArenaState;
   serverTime: number;
 };
 
@@ -62,6 +71,15 @@ export class ArenaService {
     }
 
     return snapshot;
+  }
+
+  getStreamFrame(): ArenaStreamFrame {
+    return {
+      matchId: this.match.id,
+      arena: toArenaViewModel(createPublicMatchSnapshot(this.match, { thoughtLimit: 0 }), null, [], []),
+      arenaState: cloneJson(this.arenaState),
+      serverTime: Date.now(),
+    };
   }
 
   togglePause(): ArenaSnapshot {
@@ -221,7 +239,8 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function createPublicMatchSnapshot(match: MatchState): MatchState {
+function createPublicMatchSnapshot(match: MatchState, options: { thoughtLimit?: number } = {}): MatchState {
+  const thoughtLimit = options.thoughtLimit ?? MAX_PUBLIC_THOUGHTS;
   return {
     ...match,
     bots: match.bots.map((bot) => {
@@ -229,7 +248,7 @@ function createPublicMatchSnapshot(match: MatchState): MatchState {
       return {
         ...publicBot,
         relationships: {},
-        thoughts: thoughts.slice(0, MAX_PUBLIC_THOUGHTS),
+        thoughts: thoughts.slice(0, thoughtLimit),
       };
     }),
     events: match.events.slice(0, MAX_PUBLIC_EVENTS),

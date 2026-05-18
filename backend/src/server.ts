@@ -66,7 +66,7 @@ app.get("/api/arena/stream", (request, response) => {
 
   const sendSnapshot = () => {
     response.write(`event: arena\n`);
-    response.write(`data: ${JSON.stringify(arena.getSnapshot())}\n\n`);
+    response.write(`data: ${JSON.stringify(arena.getStreamFrame())}\n\n`);
   };
   const keepAlive = () => {
     response.write(`: keep-alive\n\n`);
