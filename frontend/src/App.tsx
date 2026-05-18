@@ -17,6 +17,7 @@ import {
   saveRemoteGameState,
   sendRemoteSponsorDrop,
   startRemoteNextMatch,
+  subscribeToArenaStream,
   toggleRemoteArenaPause,
   type ArenaSnapshot,
 } from "./game/remotePersistence";
@@ -274,12 +275,31 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let loggedStreamError = false;
+    const unsubscribe = subscribeToArenaStream({
+      onSnapshot(snapshot) {
+        if (!cancelled) {
+          applyArenaSnapshot(snapshot);
+        }
+      },
+      onError(error) {
+        if (!loggedStreamError) {
+          loggedStreamError = true;
+          console.warn("Arena stream interrupted; browser will reconnect", error);
+        }
+      },
+    });
+
+    if (unsubscribe) {
+      return () => {
+        cancelled = true;
+        unsubscribe();
+      };
+    }
+
     let requestInFlight = false;
     const sync = () => {
-      if (requestInFlight) {
-        return;
-      }
-
+      if (requestInFlight) return;
       requestInFlight = true;
       void loadArenaSnapshot()
         .then((snapshot) => {

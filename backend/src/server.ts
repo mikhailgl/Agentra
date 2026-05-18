@@ -55,6 +55,33 @@ app.get("/api/arena", (request, response) => {
   response.json(arena.getSnapshot({ includeRoster: request.query.includeRoster === "1" }));
 });
 
+app.get("/api/arena/stream", (request, response) => {
+  response.writeHead(200, {
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "content-type": "text/event-stream",
+    "x-accel-buffering": "no",
+  });
+  response.flushHeaders?.();
+
+  const sendSnapshot = () => {
+    response.write(`event: arena\n`);
+    response.write(`data: ${JSON.stringify(arena.getSnapshot())}\n\n`);
+  };
+  const keepAlive = () => {
+    response.write(`: keep-alive\n\n`);
+  };
+
+  sendSnapshot();
+  const snapshotTimer = setInterval(sendSnapshot, 120);
+  const keepAliveTimer = setInterval(keepAlive, 15_000);
+
+  request.on("close", () => {
+    clearInterval(snapshotTimer);
+    clearInterval(keepAliveTimer);
+  });
+});
+
 app.post("/api/arena/toggle-pause", (_request, response) => {
   response.json(arena.togglePause());
 });

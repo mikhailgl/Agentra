@@ -96,6 +96,33 @@ export async function loadArenaSnapshot(options: { includeRoster?: boolean } = {
   return (await response.json()) as ArenaSnapshot;
 }
 
+export function subscribeToArenaStream({
+  onSnapshot,
+  onError,
+}: {
+  onSnapshot: (snapshot: ArenaSnapshot) => void;
+  onError?: (error: Event) => void;
+}): (() => void) | null {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl || typeof window === "undefined" || typeof window.EventSource === "undefined") {
+    return null;
+  }
+
+  const source = new EventSource(`${apiBaseUrl}/api/arena/stream`);
+  const handleSnapshot = (event: MessageEvent<string>) => {
+    onSnapshot(JSON.parse(event.data) as ArenaSnapshot);
+  };
+  source.addEventListener("arena", handleSnapshot);
+  source.onerror = (event) => {
+    onError?.(event);
+  };
+
+  return () => {
+    source.removeEventListener("arena", handleSnapshot);
+    source.close();
+  };
+}
+
 export async function toggleRemoteArenaPause(): Promise<ArenaSnapshot | null> {
   return postArenaAction("/api/arena/toggle-pause");
 }
