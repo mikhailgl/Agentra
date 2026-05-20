@@ -33,6 +33,16 @@ export type ArenaStreamFrame = {
   serverTime: number;
 };
 
+export type ArenaCheckpoint = {
+  version: 1;
+  matchNumber: number;
+  match: MatchState;
+  arenaState: ArenaState;
+  arenaQueueIds: string[];
+  basicResults: BasicMatchResult[];
+  savedAt: number;
+};
+
 export class ArenaService {
   private readonly persistentBots = createDefaultPool();
   private arenaQueueIds = this.normalizeQueueIds([]);
@@ -43,7 +53,7 @@ export class ArenaService {
   private lastTickAt = Date.now();
   private timer: NodeJS.Timeout | null = null;
 
-  constructor() {
+  constructor(private readonly options: { onCheckpointNeeded?: (reason: string) => void } = {}) {
     this.match = this.createMatch();
     this.arenaState = this.createRunningArenaState(this.match);
   }
@@ -82,6 +92,27 @@ export class ArenaService {
     };
   }
 
+  getCheckpoint(): ArenaCheckpoint {
+    return {
+      version: 1,
+      matchNumber: this.matchNumber,
+      match: cloneJson(this.match),
+      arenaState: cloneJson(this.arenaState),
+      arenaQueueIds: [...this.arenaQueueIds],
+      basicResults: cloneJson(this.basicResults),
+      savedAt: Date.now(),
+    };
+  }
+
+  restore(checkpoint: ArenaCheckpoint): void {
+    this.matchNumber = checkpoint.matchNumber;
+    this.match = cloneJson(checkpoint.match);
+    this.arenaState = cloneJson(checkpoint.arenaState);
+    this.arenaQueueIds = this.normalizeQueueIds(checkpoint.arenaQueueIds, new Set(this.match.bots.map((bot) => bot.id)));
+    this.basicResults = cloneJson(checkpoint.basicResults).slice(0, MAX_BASIC_RESULTS);
+    this.lastTickAt = Date.now();
+  }
+
   togglePause(): ArenaSnapshot {
     if (this.arenaState.phase === "intermission") {
       return this.getSnapshot();
@@ -100,6 +131,7 @@ export class ArenaService {
     this.match = this.createMatch(this.arenaState.lastWinnerId);
     this.arenaState = this.createRunningArenaState(this.match);
     this.lastTickAt = Date.now();
+    this.requestCheckpoint("next match");
     return this.getSnapshot();
   }
 
@@ -153,6 +185,11 @@ export class ArenaService {
       lastWinnerId: winner?.id,
       intermissionEndsAt: Date.now() + INTERMISSION_MS,
     };
+    this.requestCheckpoint("match finalized");
+  }
+
+  private requestCheckpoint(reason: string): void {
+    this.options.onCheckpointNeeded?.(reason);
   }
 
   private syncActiveBotIds(): void {

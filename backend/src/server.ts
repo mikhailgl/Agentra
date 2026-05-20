@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { ArenaCheckpointRepository } from "./arenaCheckpointRepository.js";
 import { ArenaService } from "./arenaService.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
@@ -7,9 +8,32 @@ import { createSupabaseAdmin } from "./supabase.js";
 
 const config = getConfig();
 const app = express();
-const repository = new GameStateRepository(createSupabaseAdmin(config));
-const arena = new ArenaService();
+const supabase = createSupabaseAdmin(config);
+const repository = new GameStateRepository(supabase);
+const arenaCheckpointRepository = new ArenaCheckpointRepository(supabase);
+const arena = new ArenaService({ onCheckpointNeeded: saveArenaCheckpoint });
+const restoredArena = await arenaCheckpointRepository.load();
+if (restoredArena) {
+  arena.restore(restoredArena);
+  console.log(`Restored canonical arena checkpoint at match ${restoredArena.matchNumber}`);
+}
 arena.start();
+
+let checkpointSave = Promise.resolve();
+function saveArenaCheckpoint(reason: string): void {
+  const checkpoint = arena.getCheckpoint();
+  checkpointSave = checkpointSave
+    .catch(() => undefined)
+    .then(() => arenaCheckpointRepository.save(checkpoint))
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to save canonical arena checkpoint after ${reason}: ${message}`);
+    });
+}
+
+saveArenaCheckpoint(restoredArena ? "restore" : "startup");
+const checkpointTimer = setInterval(() => saveArenaCheckpoint("periodic checkpoint"), 15_000);
+checkpointTimer.unref();
 
 app.use(express.json({ limit: "2mb" }));
 app.use(
@@ -83,11 +107,15 @@ app.get("/api/arena/stream", (request, response) => {
 });
 
 app.post("/api/arena/toggle-pause", (_request, response) => {
-  response.json(arena.togglePause());
+  const snapshot = arena.togglePause();
+  saveArenaCheckpoint("pause toggle");
+  response.json(snapshot);
 });
 
 app.post("/api/arena/start-next", (_request, response) => {
-  response.json(arena.startNextMatch());
+  const snapshot = arena.startNextMatch();
+  saveArenaCheckpoint("manual next match");
+  response.json(snapshot);
 });
 
 app.post("/api/arena/sponsor-drop", (request, response) => {
@@ -97,7 +125,9 @@ app.post("/api/arena/sponsor-drop", (request, response) => {
     return;
   }
 
-  response.json(arena.sponsorDrop(botId, kind));
+  const snapshot = arena.sponsorDrop(botId, kind);
+  saveArenaCheckpoint("sponsor drop");
+  response.json(snapshot);
 });
 
 app.put("/api/state", async (request, response, next) => {
