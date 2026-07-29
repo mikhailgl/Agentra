@@ -1,4 +1,4 @@
-import type { ArenaState, BasicMatchResult, MatchState, PersistentBot, PlayerState } from "./types";
+import type { ArenaState, BasicMatchResult, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
 import type { ArenaViewModel } from "../lib/simulation/types";
 
@@ -104,6 +104,21 @@ export async function loadArenaSnapshot(options: { includeRoster?: boolean } = {
   return (await response.json()) as ArenaSnapshot;
 }
 
+export async function loadMatchLogs(limit = 25): Promise<MatchLog[]> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) {
+    return [];
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/match-logs?limit=${encodeURIComponent(String(limit))}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load match logs: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { logs?: MatchLog[] };
+  return Array.isArray(data.logs) ? data.logs : [];
+}
+
 export function subscribeToArenaStream({
   onFrame,
   onError,
@@ -143,6 +158,28 @@ export async function sendRemoteSponsorDrop(botId: string, kind: SponsorDropKind
   return postArenaAction("/api/arena/sponsor-drop", { botId, kind });
 }
 
+export async function registerRemoteBot(bot: PersistentBot, enqueue: boolean): Promise<ArenaSnapshot | null> {
+  return postArenaAction("/api/arena/bots", { bot, enqueue });
+}
+
+export async function updateRemoteBotDoctrine(botId: string, instruction: string): Promise<ArenaSnapshot | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) {
+    return null;
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/arena/bots/${encodeURIComponent(botId)}/doctrine`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ instruction }),
+  });
+  if (!response.ok) {
+    throw new Error(await getArenaActionError(response));
+  }
+
+  return (await response.json()) as ArenaSnapshot;
+}
+
 async function postArenaAction(path: string, body?: unknown): Promise<ArenaSnapshot | null> {
   const apiBaseUrl = getApiBaseUrl();
   if (!apiBaseUrl) {
@@ -155,8 +192,20 @@ async function postArenaAction(path: string, body?: unknown): Promise<ArenaSnaps
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    throw new Error(`Arena action failed: ${response.status}`);
+    throw new Error(await getArenaActionError(response));
   }
 
   return (await response.json()) as ArenaSnapshot;
+}
+
+async function getArenaActionError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.trim()) {
+      return body.error;
+    }
+  } catch {
+    // Fall back to a status-based message when the server did not return JSON.
+  }
+  return `Arena action failed: ${response.status}`;
 }

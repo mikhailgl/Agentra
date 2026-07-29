@@ -1,5 +1,6 @@
 import { MAP_CENTER, MAP_SIZE } from "../../game/constants";
-import type { ArenaEvent, Bet, Bot, Creature, GameEvent, LootItem, MapZone, MatchState } from "../../game/types";
+import { getArenaCenter, getMatchConfig } from "../../game/matchConfig";
+import type { ArenaEvent, Bet, Bot, Creature, GameEvent, LootItem, MapZone, MatchConfig, MatchState } from "../../game/types";
 import type { ArenaBotView, ArenaCreatureView, ArenaEventView, ArenaLootView, ArenaMarkerView, ArenaViewModel, ArenaZoneView } from "./types";
 
 const ARENA_SCALE = 0.06;
@@ -29,17 +30,19 @@ export function toArenaViewModel(
   draftedBotIds: string[],
   bets: Bet[],
 ): ArenaViewModel {
+  const config = getMatchConfig(match);
   const livingBets = new Set(
     bets.filter((bet) => bet.matchId === match.id && bet.status === "pending").map((bet) => bet.botId),
   );
 
   return {
-    bots: match.bots.map((bot) => toArenaBot(bot, match, selectedBotId, draftedBotIds, livingBets)),
-    loot: match.loot.map(toArenaLoot),
-    creatures: (match.creatures ?? []).map((creature) => toArenaCreature(creature, match)),
-    events: match.events.map((event) => toArenaEvent(event, match)).filter(Boolean) as ArenaEventView[],
-    arenaEvents: (match.arenaEvents ?? []).map(toArenaMarker),
-    zones: match.zones.map(toArenaZone),
+    worldSize: config.arena.size * ARENA_SCALE,
+    bots: match.bots.map((bot) => toArenaBot(bot, match, selectedBotId, draftedBotIds, livingBets, config)),
+    loot: match.loot.map((item) => toArenaLoot(item, config)),
+    creatures: (match.creatures ?? []).map((creature) => toArenaCreature(creature, match, config)),
+    events: match.events.map((event) => toArenaEvent(event, match, config)).filter(Boolean) as ArenaEventView[],
+    arenaEvents: (match.arenaEvents ?? []).map((event) => toArenaMarker(event, config)),
+    zones: match.zones.map((zone) => toArenaZone(zone, config)),
     aliveCount: match.bots.filter((bot) => bot.alive).length,
     elapsedMs: match.elapsedMs,
     ended: match.ended,
@@ -47,8 +50,9 @@ export function toArenaViewModel(
   };
 }
 
-export function worldToArenaPoint(x: number, y: number, height = 0): [number, number, number] {
-  return [(x - HALF_MAP) * ARENA_SCALE, height, (y - HALF_MAP) * ARENA_SCALE];
+export function worldToArenaPoint(x: number, y: number, height = 0, config?: MatchConfig): [number, number, number] {
+  const center = config ? getArenaCenter(config) : HALF_MAP;
+  return [(x - center) * ARENA_SCALE, height, (y - center) * ARENA_SCALE];
 }
 
 function toArenaBot(
@@ -57,6 +61,7 @@ function toArenaBot(
   selectedBotId: string | null,
   draftedBotIds: string[],
   livingBets: Set<string>,
+  config: MatchConfig,
 ): ArenaBotView {
   const target = findBotTarget(bot, match);
   const dx = target ? target.x - bot.x : bot.wanderTarget ? bot.wanderTarget.x - bot.x : 0;
@@ -65,7 +70,7 @@ function toArenaBot(
   return {
     id: bot.id,
     name: bot.name,
-    position: worldToArenaPoint(bot.x, bot.y),
+    position: worldToArenaPoint(bot.x, bot.y, 0, config),
     rotationY: Math.atan2(dx, dy),
     health: bot.health,
     alive: bot.alive,
@@ -82,7 +87,7 @@ function toArenaBot(
     isSelected: selectedBotId === bot.id,
     isNudged: bot.activeInfluences.some((influence) => influence.expiresAtMs > match.elapsedMs),
     isWinner: match.winnerId === bot.id,
-    targetPosition: target ? worldToArenaPoint(target.x, target.y) : undefined,
+    targetPosition: target ? worldToArenaPoint(target.x, target.y, 0, config) : undefined,
   };
 }
 
@@ -91,29 +96,29 @@ function findBotTarget(bot: Bot, match: MatchState): Bot | null {
   return latestTargetId ? match.bots.find((candidate) => candidate.id === latestTargetId) ?? null : null;
 }
 
-function toArenaLoot(item: LootItem): ArenaLootView {
+function toArenaLoot(item: LootItem, config: MatchConfig): ArenaLootView {
   return {
     id: item.id,
     name: item.name,
     type: item.type,
     rarity: item.rarity,
-    position: worldToArenaPoint(item.x, item.y, 0.28),
+    position: worldToArenaPoint(item.x, item.y, 0.28, config),
   };
 }
 
-function toArenaCreature(creature: Creature, match: MatchState): ArenaCreatureView {
+function toArenaCreature(creature: Creature, match: MatchState, config: MatchConfig): ArenaCreatureView {
   const target = creature.targetBotId ? match.bots.find((bot) => bot.id === creature.targetBotId) : null;
   return {
     id: creature.id,
     name: creature.name,
-    position: worldToArenaPoint(creature.x, creature.y, 0.42),
+    position: worldToArenaPoint(creature.x, creature.y, 0.42, config),
     health: creature.health,
-    targetPosition: target ? worldToArenaPoint(target.x, target.y, 1.05) : undefined,
+    targetPosition: target ? worldToArenaPoint(target.x, target.y, 1.05, config) : undefined,
   };
 }
 
-function toArenaEvent(event: GameEvent, match: MatchState): ArenaEventView | null {
-  const position = event.x !== undefined && event.y !== undefined ? worldToArenaPoint(event.x, event.y, 1.45) : undefined;
+function toArenaEvent(event: GameEvent, match: MatchState, config: MatchConfig): ArenaEventView | null {
+  const position = event.x !== undefined && event.y !== undefined ? worldToArenaPoint(event.x, event.y, 1.45, config) : undefined;
   const attacker = event.botId ? match.bots.find((bot) => bot.id === event.botId) : null;
   const target = event.targetId ? match.bots.find((bot) => bot.id === event.targetId) : null;
   return {
@@ -122,24 +127,24 @@ function toArenaEvent(event: GameEvent, match: MatchState): ArenaEventView | nul
     message: event.message,
     label: event.label,
     position,
-    from: attacker ? worldToArenaPoint(attacker.x, attacker.y, 1.1) : undefined,
-    to: target ? worldToArenaPoint(target.x, target.y, 1.1) : position,
+    from: attacker ? worldToArenaPoint(attacker.x, attacker.y, 1.1, config) : undefined,
+    to: target ? worldToArenaPoint(target.x, target.y, 1.1, config) : position,
   };
 }
 
-function toArenaMarker(event: ArenaEvent): ArenaMarkerView {
+function toArenaMarker(event: ArenaEvent, config: MatchConfig): ArenaMarkerView {
   return {
     id: event.id,
     type: event.type,
     title: event.title,
     description: event.description,
-    position: event.location ? worldToArenaPoint(event.location.x, event.location.z, 0.08) : undefined,
+    position: event.location ? worldToArenaPoint(event.location.x, event.location.z, 0.08, config) : undefined,
     severity: event.severity,
-    radius: event.type === "danger_zone" ? 145 * ARENA_SCALE : event.type === "rare_loot_drop" ? 72 * ARENA_SCALE : 96 * ARENA_SCALE,
+    radius: event.type === "danger_zone" ? (event.radius ?? config.events.dangerZoneRadius) * ARENA_SCALE : event.type === "rare_loot_drop" ? 72 * ARENA_SCALE : 96 * ARENA_SCALE,
   };
 }
 
-function toArenaZone(zone: MapZone): ArenaZoneView {
+function toArenaZone(zone: MapZone, config: MatchConfig): ArenaZoneView {
   const width = zone.width ?? (zone.radius ?? 120) * 2;
   const height = zone.height ?? (zone.radius ?? 120) * 2;
   const centerX = zone.width ? zone.x + width / 2 : zone.x;
@@ -148,7 +153,7 @@ function toArenaZone(zone: MapZone): ArenaZoneView {
   return {
     id: zone.id,
     name: zone.name,
-    position: worldToArenaPoint(centerX, centerY, 0.012),
+    position: worldToArenaPoint(centerX, centerY, 0.012, config),
     size: [width * ARENA_SCALE, height * ARENA_SCALE],
     color: ZONE_COLORS[zone.id] ?? "#31443a",
   };

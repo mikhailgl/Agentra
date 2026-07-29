@@ -1,9 +1,16 @@
-import { BOT_COUNT, PERSISTENT_BOT_COUNT } from "../../frontend/src/game/constants.js";
 import { createMatchFromPool } from "../../frontend/src/game/createMatch.js";
-import { createDefaultPool } from "../../frontend/src/game/persistence.js";
+import { createMatchLog } from "../../frontend/src/game/matchLog.js";
+import { DEFAULT_MATCH_CONFIG, getQueueTargetSize } from "../../frontend/src/game/matchConfig.js";
+import {
+  applyPersistentBotDoctrine,
+  applyPersistentBotMatchResult,
+  createDefaultPool,
+  normalizeAffinities,
+  summarizeDoctrine,
+} from "../../frontend/src/game/persistence.js";
 import { createRng, shuffle } from "../../frontend/src/game/random.js";
 import { spawnSponsorDrop, stepSimulation, type SponsorDropKind } from "../../frontend/src/game/simulation.js";
-import type { ArenaState, BasicMatchResult, MatchState, PersistentBot } from "../../frontend/src/game/types.js";
+import type { ArenaState, BaseStats, BasicMatchResult, Bot, BotAffinities, MatchLog, MatchState, PersistentBot, Psychology } from "../../frontend/src/game/types.js";
 import { toArenaViewModel } from "../../frontend/src/lib/simulation/simulationTo3D.js";
 import type { ArenaViewModel } from "../../frontend/src/lib/simulation/types.js";
 
@@ -11,7 +18,6 @@ const INTERMISSION_MS = 5_000;
 const TICK_MS = 50;
 const MAX_DELTA_MS = 100;
 const MAX_BASIC_RESULTS = 10;
-const QUEUE_TARGET_SIZE = Math.max(BOT_COUNT * 2, PERSISTENT_BOT_COUNT);
 const MAX_PUBLIC_EVENTS = 24;
 const MAX_PUBLIC_MATCH_EVENTS = 24;
 const MAX_PUBLIC_THOUGHTS = 8;
@@ -34,16 +40,18 @@ export type ArenaStreamFrame = {
 };
 
 export type ArenaCheckpoint = {
-  version: 1;
+  version: 1 | 2;
   matchNumber: number;
   match: MatchState;
   arenaState: ArenaState;
+  persistentBots?: PersistentBot[];
   arenaQueueIds: string[];
   basicResults: BasicMatchResult[];
   savedAt: number;
 };
 
 export class ArenaService {
+  private readonly matchConfig = DEFAULT_MATCH_CONFIG;
   private readonly persistentBots = createDefaultPool();
   private arenaQueueIds = this.normalizeQueueIds([]);
   private basicResults: BasicMatchResult[] = [];
@@ -53,7 +61,7 @@ export class ArenaService {
   private lastTickAt = Date.now();
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly options: { onCheckpointNeeded?: (reason: string) => void } = {}) {
+  constructor(private readonly options: { onCheckpointNeeded?: (reason: string) => void; onMatchLogReady?: (log: MatchLog) => void } = {}) {
     this.match = this.createMatch();
     this.arenaState = this.createRunningArenaState(this.match);
   }
@@ -65,6 +73,14 @@ export class ArenaService {
     this.lastTickAt = Date.now();
     this.timer = setInterval(() => this.tick(), TICK_MS);
     this.timer.unref();
+  }
+
+  stop(): void {
+    if (!this.timer) {
+      return;
+    }
+    clearInterval(this.timer);
+    this.timer = null;
   }
 
   getSnapshot(options: { includeRoster?: boolean } = {}): ArenaSnapshot {
@@ -94,10 +110,11 @@ export class ArenaService {
 
   getCheckpoint(): ArenaCheckpoint {
     return {
-      version: 1,
+      version: 2,
       matchNumber: this.matchNumber,
       match: cloneJson(this.match),
       arenaState: cloneJson(this.arenaState),
+      persistentBots: cloneJson(this.persistentBots),
       arenaQueueIds: [...this.arenaQueueIds],
       basicResults: cloneJson(this.basicResults),
       savedAt: Date.now(),
@@ -105,6 +122,9 @@ export class ArenaService {
   }
 
   restore(checkpoint: ArenaCheckpoint): void {
+    if (checkpoint.persistentBots?.length) {
+      this.persistentBots.splice(0, this.persistentBots.length, ...cloneJson(checkpoint.persistentBots));
+    }
     this.matchNumber = checkpoint.matchNumber;
     this.match = cloneJson(checkpoint.match);
     this.arenaState = cloneJson(checkpoint.arenaState);
@@ -135,9 +155,38 @@ export class ArenaService {
     return this.getSnapshot();
   }
 
-  sponsorDrop(botId: string, kind: SponsorDropKind): ArenaSnapshot {
-    spawnSponsorDrop(this.match, botId, kind);
-    return this.getSnapshot();
+  sponsorDrop(botId: string, kind: SponsorDropKind): ArenaSnapshot | null {
+    return spawnSponsorDrop(this.match, botId, kind) ? this.getSnapshot() : null;
+  }
+
+  registerCustomBot(rawBot: unknown, enqueue: boolean): ArenaSnapshot | null {
+    const candidate = normalizeCustomBot(rawBot);
+    if (!candidate) {
+      return null;
+    }
+
+    const existingIndex = this.persistentBots.findIndex((bot) => bot.id === candidate.id);
+    if (existingIndex === -1) {
+      this.persistentBots.unshift(candidate);
+    }
+
+    if (enqueue && !this.match.bots.some((bot) => bot.id === candidate.id)) {
+      this.arenaQueueIds = this.normalizeQueueIds([candidate.id, ...this.arenaQueueIds]);
+    }
+
+    this.requestCheckpoint(existingIndex === -1 ? "custom bot registered" : "custom bot requeued");
+    return this.getSnapshot({ includeRoster: true });
+  }
+
+  updateBotDoctrine(botId: string, instruction: string): ArenaSnapshot | null {
+    const index = this.persistentBots.findIndex((bot) => bot.id === botId && bot.custom);
+    if (index === -1) {
+      return null;
+    }
+
+    this.persistentBots[index] = applyPersistentBotDoctrine(this.persistentBots[index], instruction);
+    this.requestCheckpoint("bot doctrine updated");
+    return this.getSnapshot({ includeRoster: true });
   }
 
   private tick(): void {
@@ -167,16 +216,20 @@ export class ArenaService {
     }
 
     this.match.finalized = true;
+    const endedAt = Date.now();
     const winner = this.match.winnerId ? this.match.bots.find((bot) => bot.id === this.match.winnerId) ?? null : null;
     this.basicResults = [
       {
         matchNumber: this.matchNumber,
         winnerBotId: winner?.id ?? "no-survivor",
         winnerName: winner?.name ?? "No survivor",
-        endedAt: Date.now(),
+        endedAt,
       },
       ...this.basicResults.filter((result) => result.matchNumber !== this.matchNumber),
     ].slice(0, MAX_BASIC_RESULTS);
+
+    this.options.onMatchLogReady?.(createMatchLog(this.matchNumber, this.match, endedAt));
+    this.applyPersistentProgression();
 
     this.arenaState = {
       ...this.arenaState,
@@ -190,6 +243,19 @@ export class ArenaService {
 
   private requestCheckpoint(reason: string): void {
     this.options.onCheckpointNeeded?.(reason);
+  }
+
+  private applyPersistentProgression(): void {
+    const placements = getPlacements(this.match.bots);
+    for (const matchBot of this.match.bots) {
+      const persistent = this.persistentBots.find((bot) => bot.id === matchBot.id);
+      if (!persistent) {
+        continue;
+      }
+
+      const placement = placements.get(matchBot.id) ?? this.match.bots.length;
+      applyPersistentBotMatchResult(persistent, matchBot, this.match, placement, this.matchNumber);
+    }
   }
 
   private syncActiveBotIds(): void {
@@ -206,7 +272,7 @@ export class ArenaService {
 
   private createMatch(carryOverBotId?: string): MatchState {
     const entrants = this.takeQueuedEntrants(carryOverBotId);
-    return createMatchFromPool(this.persistentBots, entrants, carryOverBotId);
+    return createMatchFromPool(this.persistentBots, entrants, carryOverBotId, 0, this.matchConfig);
   }
 
   private createRunningArenaState(match: MatchState): ArenaState {
@@ -224,7 +290,7 @@ export class ArenaService {
     const entrants: PersistentBot[] = carryOverBot ? [carryOverBot] : [];
     this.arenaQueueIds = this.normalizeQueueIds(this.arenaQueueIds, selectedIds);
 
-    while (entrants.length < BOT_COUNT) {
+    while (entrants.length < this.matchConfig.roster.matchBotCount) {
       const nextId = this.arenaQueueIds.shift();
       if (!nextId || selectedIds.has(nextId)) {
         break;
@@ -240,12 +306,13 @@ export class ArenaService {
     }
 
     this.arenaQueueIds = this.normalizeQueueIds(this.arenaQueueIds, selectedIds);
-    return entrants.slice(0, BOT_COUNT);
+    return entrants.slice(0, this.matchConfig.roster.matchBotCount);
   }
 
   private normalizeQueueIds(rawIds: string[], excludedIds = new Set<string>()): string[] {
     const validIds = new Set(this.persistentBots.map((bot) => bot.id));
     const seen = new Set<string>();
+    const queueTargetSize = getQueueTargetSize(this.matchConfig);
     const next = rawIds.filter((id) => {
       if (!validIds.has(id) || excludedIds.has(id) || seen.has(id)) {
         return false;
@@ -254,7 +321,7 @@ export class ArenaService {
       return true;
     });
 
-    while (next.length < QUEUE_TARGET_SIZE) {
+    while (next.length < queueTargetSize) {
       const filler = shuffle(
         this.persistentBots.filter((bot) => !bot.custom && !excludedIds.has(bot.id) && !seen.has(bot.id)),
         createRng(hashSeed(`${Date.now()}:${next.length}:${this.persistentBots.length}`)),
@@ -268,7 +335,7 @@ export class ArenaService {
       }
     }
 
-    return next.slice(0, QUEUE_TARGET_SIZE);
+    return next.slice(0, queueTargetSize);
   }
 }
 
@@ -290,6 +357,7 @@ function createPublicMatchSnapshot(match: MatchState, options: { thoughtLimit?: 
     }),
     events: match.events.slice(0, MAX_PUBLIC_EVENTS),
     matchEvents: match.matchEvents.slice(0, MAX_PUBLIC_MATCH_EVENTS),
+    logEvents: [],
     narrativeMoments: match.narrativeMoments.slice(0, 6),
     historyEvents: [],
     learningEvents: [],
@@ -304,6 +372,85 @@ function createPublicPersistentBotSnapshot(bot: PersistentBot): PersistentBot {
     relationships: {},
     journal: journal?.slice(0, MAX_PUBLIC_JOURNAL_ENTRIES),
   };
+}
+
+function getPlacements(bots: Bot[]): Map<string, number> {
+  return new Map(
+    [...bots]
+      .sort((a, b) => b.survivalTimeMs - a.survivalTimeMs || b.kills - a.kills || b.damageDealt - a.damageDealt)
+      .map((bot, index) => [bot.id, index + 1]),
+  );
+}
+
+function normalizeCustomBot(value: unknown): PersistentBot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const input = value as Partial<PersistentBot>;
+  if (typeof input.id !== "string" || !/^custom-[a-zA-Z0-9_-]{8,80}$/.test(input.id)) {
+    return null;
+  }
+
+  const name = typeof input.name === "string" ? input.name.trim().slice(0, 24) : "";
+  if (!name) {
+    return null;
+  }
+
+  const baseStats = normalizeBaseStats(input.baseStats);
+  const psychology = normalizePsychology(input.psychology);
+  if (!baseStats || !psychology) {
+    return null;
+  }
+
+  const tacticalInstruction = typeof input.tacticalInstruction === "string" ? input.tacticalInstruction.trim().slice(0, 180) : "";
+  const traits = Array.isArray(input.traits)
+    ? [...new Set(input.traits.filter((trait): trait is string => typeof trait === "string" && /^[a-z0-9_-]{1,32}$/i.test(trait)))].slice(0, 4)
+    : [];
+
+  return {
+    id: input.id,
+    name,
+    level: 1,
+    xp: 0,
+    baseStats,
+    traits,
+    psychology,
+    career: { matchesPlayed: 0, wins: 0, kills: 0, damageDealt: 0, longestSurvivalTime: 0 },
+    relationships: {},
+    recentResults: ["Released into the arena."],
+    affinities: normalizeAffinities(input.affinities as Partial<BotAffinities> | undefined),
+    custom: true,
+    tacticalInstruction,
+    doctrineSummary: summarizeDoctrine(tacticalInstruction),
+    journal: [
+      {
+        id: `journal-${Date.now()}-${input.id}-origin`,
+        timestamp: Date.now(),
+        title: "Released into the ludus",
+        body: `${name} entered the arena with a ${summarizeDoctrine(tacticalInstruction).toLowerCase()} doctrine.`,
+        tone: "origin",
+      },
+    ],
+  };
+}
+
+function normalizeBaseStats(value: PersistentBot["baseStats"] | undefined): BaseStats | null {
+  if (!value) return null;
+  const keys: Array<keyof BaseStats> = ["strength", "speed", "perception", "endurance"];
+  if (!keys.every((key) => Number.isFinite(value[key]))) return null;
+  return Object.fromEntries(keys.map((key) => [key, clampNumber(value[key], 1, 20)])) as BaseStats;
+}
+
+function normalizePsychology(value: PersistentBot["psychology"] | undefined): Psychology | null {
+  if (!value) return null;
+  const keys: Array<keyof Psychology> = ["aggression", "loyalty", "opportunism", "selfPreservation", "ambition", "sociability", "vengefulness", "riskTolerance"];
+  if (!keys.every((key) => Number.isFinite(value[key]))) return null;
+  return Object.fromEntries(keys.map((key) => [key, clampNumber(value[key], 0, 1)])) as Psychology;
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }
 
 function hashSeed(input: string): number {

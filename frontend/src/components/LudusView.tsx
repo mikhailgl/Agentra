@@ -26,22 +26,29 @@ export function LudusView({
   queuedBotIds,
   activeBotIds,
   onBackToArena,
+  onOpenVideos,
   onCreateBot,
   onEnterBot,
   onAddCredits,
   onUpdateDoctrine,
+  mutationPending,
+  actionError,
 }: {
   bots: PersistentBot[];
   player: PlayerState;
   queuedBotIds: string[];
   activeBotIds: string[];
   onBackToArena: () => void;
-  onCreateBot: (build: CustomBotBuild, enterContest: boolean) => void;
+  onOpenVideos: () => void;
+  onCreateBot: (build: CustomBotBuild, enterContest: boolean) => Promise<boolean>;
   onEnterBot: (botId: string) => void;
   onAddCredits: () => void;
   onUpdateDoctrine: (botId: string, instruction: string) => void;
+  mutationPending: boolean;
+  actionError: string | null;
 }) {
-  const ownedBots = useMemo(() => bots.filter((bot) => bot.custom), [bots]);
+  const ownedBotIds = useMemo(() => new Set(player.ownedBotIds), [player.ownedBotIds]);
+  const ownedBots = useMemo(() => bots.filter((bot) => bot.custom && ownedBotIds.has(bot.id)), [bots, ownedBotIds]);
   const publicBots = useMemo(() => bots.filter((bot) => !bot.custom).slice(0, 8), [bots]);
   const [selectedBotId, setSelectedBotId] = useState(() => ownedBots[0]?.id ?? bots[0]?.id ?? "");
   const [tab, setTab] = useState<LudusTab>("profile");
@@ -64,7 +71,10 @@ export function LudusView({
           <button type="button" className="secondary-button" onClick={onBackToArena}>
             Arena
           </button>
-          <button type="button" onClick={() => setShowCreator(true)}>
+          <button type="button" className="secondary-button" onClick={onOpenVideos}>
+            Videos
+          </button>
+          <button type="button" onClick={() => setShowCreator(true)} disabled={mutationPending}>
             Create fighter
           </button>
         </div>
@@ -107,6 +117,7 @@ export function LudusView({
               isActive={activeBotIds.includes(selectedBot.id)}
               canAfford={player.credits >= BOT_CONTEST_ENTRY_FEE}
               onEnter={() => onEnterBot(selectedBot.id)}
+              pending={mutationPending}
             />
             <nav className="ludus-tabs" aria-label="Bot profile sections">
               {(["profile", "journal", "doctrine"] as const).map((entry) => (
@@ -117,27 +128,31 @@ export function LudusView({
             </nav>
             {tab === "profile" && <ProfileTab bot={selectedBot} />}
             {tab === "journal" && <JournalTab bot={selectedBot} />}
-            {tab === "doctrine" && <DoctrineTab bot={selectedBot} onUpdateDoctrine={onUpdateDoctrine} />}
+            {tab === "doctrine" && <DoctrineTab bot={selectedBot} onUpdateDoctrine={onUpdateDoctrine} pending={mutationPending} />}
           </section>
         ) : (
           <section className="ludus-profile empty-ludus">
             <h2>No fighters yet</h2>
             <p>Create a custom fighter to start managing your ludus.</p>
-            <button type="button" onClick={() => setShowCreator(true)}>
+            <button type="button" onClick={() => setShowCreator(true)} disabled={mutationPending}>
               Create fighter
             </button>
           </section>
         )}
       </section>
 
+      {actionError && <p className="ludus-action-error" role="alert">{actionError}</p>}
+
       {showCreator && (
         <CustomBotCreator
           credits={player.credits}
           creationCost={CUSTOM_BOT_CREATION_COST}
+          pending={mutationPending}
           onClose={() => setShowCreator(false)}
           onCreate={(build, enterContest) => {
-            onCreateBot(build, enterContest);
-            setShowCreator(false);
+            void onCreateBot(build, enterContest).then((created) => {
+              if (created) setShowCreator(false);
+            });
           }}
         />
       )}
@@ -191,6 +206,7 @@ function BotProfileHeader({
   isQueued,
   isActive,
   canAfford,
+  pending,
   onEnter,
 }: {
   bot: PersistentBot;
@@ -198,6 +214,7 @@ function BotProfileHeader({
   isQueued: boolean;
   isActive: boolean;
   canAfford: boolean;
+  pending: boolean;
   onEnter: () => void;
 }) {
   return (
@@ -212,11 +229,11 @@ function BotProfileHeader({
       </div>
       <button
         type="button"
-        disabled={!canEnter || !canAfford}
+        disabled={pending || !canEnter || !canAfford}
         title={isActive ? "Already fighting" : isQueued ? "Already queued" : canAfford ? "" : `Need ${BOT_CONTEST_ENTRY_FEE} credits`}
         onClick={onEnter}
       >
-        {isActive ? "In Arena" : isQueued ? "Queued" : `Enter (${BOT_CONTEST_ENTRY_FEE})`}
+        {pending ? "Saving..." : isActive ? "In Arena" : isQueued ? "Queued" : `Enter (${BOT_CONTEST_ENTRY_FEE})`}
       </button>
     </header>
   );
@@ -278,7 +295,7 @@ function JournalTab({ bot }: { bot: PersistentBot }) {
   );
 }
 
-function DoctrineTab({ bot, onUpdateDoctrine }: { bot: PersistentBot; onUpdateDoctrine: (botId: string, instruction: string) => void }) {
+function DoctrineTab({ bot, onUpdateDoctrine, pending }: { bot: PersistentBot; onUpdateDoctrine: (botId: string, instruction: string) => void; pending: boolean }) {
   const [draft, setDraft] = useState(bot.tacticalInstruction ?? "");
   const disabled = !bot.custom;
   return (
@@ -290,8 +307,8 @@ function DoctrineTab({ bot, onUpdateDoctrine }: { bot: PersistentBot; onUpdateDo
         <span>Current read</span>
         <strong>{bot.doctrineSummary ?? "Autonomous instincts"}</strong>
       </div>
-      <button type="button" disabled={disabled || draft.trim() === (bot.tacticalInstruction ?? "")} onClick={() => onUpdateDoctrine(bot.id, draft)}>
-        Save doctrine
+      <button type="button" disabled={pending || disabled || draft.trim() === (bot.tacticalInstruction ?? "")} onClick={() => onUpdateDoctrine(bot.id, draft)}>
+        {pending ? "Saving..." : "Save doctrine"}
       </button>
     </section>
   );

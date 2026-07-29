@@ -1,16 +1,12 @@
 import {
   EVENT_DEBOUNCE_MS,
-  LOOT_PICKUP_RADIUS,
-  LOOT_ZONE_RADIUS,
-  MAP_CENTER,
-  MAX_EVENTS,
-  SPONSOR_DROP_RADIUS,
   WEAPONS,
 } from "./constants";
 import { addNarrativeMoment, forceArenaEvent as forceArenaEventInternal, isPointInActiveDangerZone, isSuddenDeathActive, updateArenaEventSystem } from "./arenaEvents";
 import { decideBotAction } from "./ai";
 import { clampToMap, getBiomeAt, getBiomeName } from "./biomes";
 import { createLegacyWeaponLoot, createRandomLoot } from "./loot";
+import { getArenaCenter, getMatchConfig } from "./matchConfig";
 import {
   LOW_HP_THRESHOLD,
   createFirstBloodEvent,
@@ -42,6 +38,7 @@ import type { BotDecision } from "./ai";
 import type { ArenaEventType, BehaviorState, BiomeType, Bot, Creature, EquipmentItem, GameEvent, InfluenceType, LootItem, MapEvent, MatchState, Nudge, Weapon } from "./types";
 
 export type SponsorDropKind = Weapon["name"] | "Medkit";
+const MAX_MATCH_LOG_EVENTS = 4_000;
 
 const NUDGE_DURATION_MS: Record<InfluenceType, number> = {
   aggression: 20_000,
@@ -56,6 +53,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
   }
 
   ensureRuntimeMatchEventFields(match);
+  const config = getMatchConfig(match);
   match.elapsedMs += deltaMs;
   const moveDistanceScale = deltaMs / 1000;
   expireAlliances(match, addEvent.bind(null, match));
@@ -78,7 +76,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
     const moveDistance = bot.speed * Math.max(0.52, speedModifier) * moveDistanceScale;
 
     if (decision.action === "flee") {
-      const next = moveAway(bot, decision.target, moveDistance * 1.25);
+      const next = moveAway(bot, decision.target, moveDistance * 1.25, config);
       bot.x = next.x;
       bot.y = next.y;
       addEvent(match, `${bot.name} is fleeing from ${decision.target.name}.`, `flee-${bot.id}`, 3200, {
@@ -93,7 +91,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
     }
 
     if (decision.action === "flee_creature") {
-      const next = moveAway(bot, decision.target, moveDistance * 1.3);
+      const next = moveAway(bot, decision.target, moveDistance * 1.3, config);
       bot.x = next.x;
       bot.y = next.y;
       addEvent(match, `${bot.name} flees from ${decision.target.name}.`, `flee-creature-${bot.id}-${decision.target.id}`, 2600, {
@@ -107,7 +105,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
     }
 
     if (decision.action === "escape_zone") {
-      const next = moveToward(bot, decision.target, moveDistance * 1.4);
+      const next = moveToward(bot, decision.target, moveDistance * 1.4, config);
       bot.x = next.x;
       bot.y = next.y;
       addEvent(match, `${bot.name} escapes the danger zone.`, `escape-zone-${bot.id}`, 3000, {
@@ -120,7 +118,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
     }
 
     if (decision.action === "avoid") {
-      const next = moveAway(bot, decision.target, moveDistance * 1.15);
+      const next = moveAway(bot, decision.target, moveDistance * 1.15, config);
       bot.x = next.x;
       bot.y = next.y;
       addEvent(match, `${bot.name} avoids ${decision.target.name} out of fear.`, `avoid-${bot.id}-${decision.target.id}`, 4500, {
@@ -140,7 +138,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
       decision.action === "follow" ||
       decision.action === "maintain_alliance"
     ) {
-      const next = moveToward(bot, decision.target, moveDistance);
+      const next = moveToward(bot, decision.target, moveDistance, config);
       bot.x = next.x;
       bot.y = next.y;
       if (decision.action === "follow") {
@@ -217,7 +215,8 @@ export function spawnSponsorDrop(match: MatchState, botId: string, kind: Sponsor
     return false;
   }
 
-  const position = randomPointInCircle(bot, SPONSOR_DROP_RADIUS, createRng(hashSeed(`${match.id}:${bot.id}:${kind}:${match.nextEventId}`)));
+  const config = getMatchConfig(match);
+  const position = randomPointInCircle(bot, config.loot.sponsorDropRadius, createRng(hashSeed(`${match.id}:${bot.id}:${kind}:${match.nextEventId}`)), config);
   const item = createSponsorItem(match, position.x, position.y, kind);
   match.loot.push(item);
   addEvent(match, `${bot.name} receives a sponsor drop: ${getLootLabel(item)}.`, undefined, 0, {
@@ -435,8 +434,9 @@ function tryAttackCreature(match: MatchState, attacker: Bot, creature: Creature)
 }
 
 function pickupLoot(match: MatchState, bot: Bot): void {
+  const config = getMatchConfig(match);
   const lootIndex = match.loot.findIndex(
-    (item) => distance(bot, item) <= LOOT_PICKUP_RADIUS && shouldPickup(bot, item, match),
+    (item) => distance(bot, item) <= config.loot.pickupRadius && shouldPickup(bot, item, match),
   );
 
   if (lootIndex === -1) {
@@ -568,10 +568,11 @@ function evaluateLoot(bot: Bot, item: LootItem): number {
 }
 
 function finishIfNeeded(match: MatchState): void {
+  const config = getMatchConfig(match);
   const living = match.bots.filter((bot) => bot.alive);
 
-  if (living.length === 3) {
-    addEvent(match, "Final phase: three bots remain.", "final-phase", 60_000, {
+  if (living.length === config.rules.finalPhaseBotCount) {
+    addEvent(match, `Final phase: ${config.rules.finalPhaseBotCount} bots remain.`, "final-phase", 60_000, {
       kind: "system",
       x: living.reduce((sum, bot) => sum + bot.x, 0) / living.length,
       y: living.reduce((sum, bot) => sum + bot.y, 0) / living.length,
@@ -579,13 +580,23 @@ function finishIfNeeded(match: MatchState): void {
     });
   }
 
-  if (living.length <= 1) {
+  if (living.length <= config.rules.winnersRemaining) {
     match.ended = true;
     match.winnerId = living[0]?.id ?? null;
     for (const bot of match.bots) {
       if (bot.alive) {
         bot.survivalTimeMs = match.elapsedMs;
       }
+    }
+    if (living[0] && (match.prizePoolCredits ?? 0) > 0) {
+      living[0].carriedCredits += match.prizePoolCredits;
+      addEvent(match, `${living[0].name} claims the ${match.prizePoolCredits} credit entry prize.`, undefined, 0, {
+        kind: "winner",
+        botId: living[0].id,
+        x: living[0].x,
+        y: living[0].y,
+        label: `+${match.prizePoolCredits}`,
+      });
     }
     addEvent(match, match.winnerId ? `${living[0].name} wins the match.` : "No bots survived.", undefined, 0, {
       kind: "winner",
@@ -657,10 +668,15 @@ function addEvent(
   }
 
   const event = { id: match.nextEventId, timeMs: match.elapsedMs, message, ...meta };
+  match.logEvents ??= [];
+  match.logEvents.push(event);
+  if (match.logEvents.length > MAX_MATCH_LOG_EVENTS) {
+    match.logEvents.splice(0, match.logEvents.length - MAX_MATCH_LOG_EVENTS);
+  }
   if (shouldPreserveForHistory(event)) {
     match.historyEvents = [...(match.historyEvents ?? []), event];
   }
-  match.events = [event, ...match.events].slice(0, MAX_EVENTS);
+  match.events = [event, ...match.events].slice(0, getMatchConfig(match).rules.maxVisibleEvents);
   match.nextEventId += 1;
 }
 
@@ -716,7 +732,7 @@ function dropInventoryAndCredits(match: MatchState, bot: Bot): void {
 }
 
 function createWeaponDrop(match: MatchState, bot: Bot, weapon: Weapon, index: number): LootItem {
-  const point = getDropPoint(bot, index);
+  const point = getDropPoint(match, bot, index);
   return {
     id: `drop-${bot.id}-${match.nextEventId}-${index}-weapon`,
     x: point.x,
@@ -731,7 +747,7 @@ function createWeaponDrop(match: MatchState, bot: Bot, weapon: Weapon, index: nu
 }
 
 function createEquipmentDrop(match: MatchState, bot: Bot, item: EquipmentItem, index: number): LootItem {
-  const point = getDropPoint(bot, index);
+  const point = getDropPoint(match, bot, index);
   if (item.category === "armor") {
     return {
       id: `drop-${bot.id}-${match.nextEventId}-${index}-armor`,
@@ -762,7 +778,7 @@ function createEquipmentDrop(match: MatchState, bot: Bot, item: EquipmentItem, i
 }
 
 function createCreditDrop(match: MatchState, bot: Bot, amount: number, index: number): LootItem {
-  const point = getDropPoint(bot, index);
+  const point = getDropPoint(match, bot, index);
   return {
     id: `drop-${bot.id}-${match.nextEventId}-${index}-credits`,
     x: point.x,
@@ -776,13 +792,13 @@ function createCreditDrop(match: MatchState, bot: Bot, amount: number, index: nu
   };
 }
 
-function getDropPoint(bot: Bot, index: number): { x: number; y: number } {
+function getDropPoint(match: MatchState, bot: Bot, index: number): { x: number; y: number } {
   const angle = index * 2.399963 + bot.x * 0.013 + bot.y * 0.017;
   const radius = 8 + index * 5;
   return clampToMap({
     x: bot.x + Math.cos(angle) * radius,
     y: bot.y + Math.sin(angle) * radius,
-  });
+  }, getMatchConfig(match));
 }
 
 function formatDroppedItems(items: string[]): string {
@@ -826,6 +842,9 @@ function ensureRuntimeBotFields(bot: Bot): void {
 }
 
 function ensureRuntimeMatchEventFields(match: MatchState): void {
+  match.config = getMatchConfig(match);
+  match.entryFeeCredits ??= 0;
+  match.prizePoolCredits ??= 0;
   match.matchEvents ??= [];
   match.matchEventState ??= {
     firstBloodEmitted: false,
@@ -848,6 +867,7 @@ function ensureRuntimeMatchEventFields(match: MatchState): void {
   match.matchEventState.lastNarrativeByKey ??= {};
   match.arenaEvents ??= [];
   match.narrativeMoments ??= [];
+  match.logEvents ??= [...(match.historyEvents ?? []), ...[...(match.events ?? [])].reverse()];
 }
 
 function recordBotThought(match: MatchState, bot: Bot, decision: BotDecision): void {
@@ -986,6 +1006,8 @@ function updateBotBiome(match: MatchState, bot: Bot, deltaMs: number): void {
 }
 
 function updateMapEvents(match: MatchState, deltaMs: number): void {
+  const config = getMatchConfig(match);
+  const arenaCenter = getArenaCenter(config);
   match.mapEvents = match.mapEvents.filter((event) => event.startedAtMs + event.durationMs > match.elapsedMs);
   const bucket = Math.floor(match.elapsedMs / 10_000);
   const roll = deterministicRoll(`${match.id}:event:${bucket}`);
@@ -1010,7 +1032,7 @@ function updateMapEvents(match: MatchState, deltaMs: number): void {
             y: bot.y,
             label: "Hazard",
           });
-          bot.wanderTarget = randomPointInCircle({ x: MAP_CENTER, y: MAP_CENTER }, LOOT_ZONE_RADIUS * 2.1, createRng(hashSeed(`${event.id}:${bot.id}:escape`)));
+          bot.wanderTarget = randomPointInCircle({ x: arenaCenter, y: arenaCenter }, config.arena.lootZoneRadius * 2.1, createRng(hashSeed(`${event.id}:${bot.id}:escape`)), config);
         }
       }
     }
@@ -1033,7 +1055,7 @@ function spawnMapEvent(match: MatchState, bucket: number): void {
   match.mapEvents.push(event);
 
   if (type === "supply_drop" || type === "loot_surge") {
-    const point = randomPointInCircle(zone, zone.radius ?? Math.min(zone.width ?? 180, zone.height ?? 180) / 2, rng);
+    const point = randomPointInCircle(zone, zone.radius ?? Math.min(zone.width ?? 180, zone.height ?? 180) / 2, rng, getMatchConfig(match));
     const loot = createRandomLoot(`event-loot-${match.nextEventId}`, point.x, point.y, match.zones, rng);
     match.loot.push(loot);
     addEvent(match, `${type === "supply_drop" ? "A supply drop lands" : "A loot surge appears"} in the ${zone.name}.`, undefined, 0, {
@@ -1082,6 +1104,7 @@ function spawnCreature(match: MatchState, biome: BiomeType, x: number, y: number
 }
 
 function updateCreatures(match: MatchState): void {
+  const config = getMatchConfig(match);
   match.creatures = match.creatures.filter((creature) => creature.health > 0 && (!creature.expiresAtMs || creature.expiresAtMs > match.elapsedMs));
   for (const creature of match.creatures) {
     const target = match.bots
@@ -1091,7 +1114,7 @@ function updateCreatures(match: MatchState): void {
     creature.targetBotId = target.id;
     const close = distance(target, creature) < 72;
     if (!close) {
-      const next = moveToward(creature, target, 1.8);
+      const next = moveToward(creature, target, 1.8, config);
       creature.x = next.x;
       creature.y = next.y;
       continue;
@@ -1108,7 +1131,7 @@ function updateCreatures(match: MatchState): void {
       continue;
     }
     target.health = Math.max(0, target.health - creature.damage);
-    target.wanderTarget = clampToMap(moveAway(target, creature, 120));
+    target.wanderTarget = clampToMap(moveAway(target, creature, 120, config), config);
     addEvent(match, `${creature.name} mauls ${target.name}; ${target.psychology.selfPreservation > 0.55 ? "they flee" : "they stagger back"}.`, `creature-hit-${target.id}`, 1800, {
       kind: "damage",
       botId: target.id,

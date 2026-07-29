@@ -15,11 +15,13 @@ const STYLES: Style[] = ["aggressive", "defensive", "opportunistic", "stealthy",
 export function CustomBotCreator({
   credits,
   creationCost,
+  pending = false,
   onClose,
   onCreate,
 }: {
   credits: number;
   creationCost: number;
+  pending?: boolean;
   onClose: () => void;
   onCreate: (build: { name: string; baseStats: BaseStats; psychology: Psychology; traits: string[]; affinities: BotAffinities; tacticalInstruction: string }, enterContest: boolean) => void;
 }) {
@@ -53,7 +55,7 @@ export function CustomBotCreator({
             <span>Create a fighter</span>
             <h2>Allocate traits</h2>
           </div>
-          <button type="button" className="secondary-button" onClick={onClose}>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={pending}>
             Close
           </button>
         </div>
@@ -111,11 +113,11 @@ export function CustomBotCreator({
           <p>{summary.text}</p>
         </div>
         <div className="creator-actions">
-          <button type="button" className="secondary-button" disabled={!valid || !canCreate} title={!valid ? "Spend exactly 35 points" : canCreate ? "" : `Need ${creationCost} credits to create`} onClick={() => onCreate(buildBot(), false)}>
-            Create ({creationCost} credits)
+          <button type="button" className="secondary-button" disabled={pending || !valid || !canCreate} title={!valid ? "Spend exactly 35 points" : canCreate ? "" : `Need ${creationCost} credits to create`} onClick={() => onCreate(buildBot(), false)}>
+            {pending ? "Creating..." : `Create (${creationCost} credits)`}
           </button>
-          <button type="button" disabled={!valid || !canCreate} title={!valid ? "Spend exactly 35 points" : canCreate ? "" : `Need ${creationCost} credits to create and enter`} onClick={() => onCreate(buildBot(), true)}>
-            Create and enter ({creationCost} credits)
+          <button type="button" disabled={pending || !valid || !canCreate} title={!valid ? "Spend exactly 35 points" : canCreate ? "" : `Need ${creationCost} credits to create and enter`} onClick={() => onCreate(buildBot(), true)}>
+            {pending ? "Creating..." : `Create and enter (${creationCost} credits)`}
           </button>
         </div>
       </section>

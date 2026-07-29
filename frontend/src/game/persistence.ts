@@ -54,27 +54,49 @@ export function updatePersistentBotsAfterMatch(match: MatchState, matchNumber?: 
       continue;
     }
 
-    persistent.relationships = matchBot.relationships;
-    const previousLevel = persistent.level;
-    const progressionResult = applyMatchProgression(
+    applyPersistentBotMatchResult(
       persistent,
       matchBot,
+      match,
       placements.get(matchBot.id) ?? match.bots.length,
-      match.bots.length,
-      match.winnerId === matchBot.id,
+      matchNumber,
     );
-    persistent.journal = addJournalEntry(persistent.journal, createMatchJournalEntry(persistent, matchBot, progressionResult, placements.get(matchBot.id) ?? match.bots.length, match.bots.length, matchNumber, previousLevel));
-    matchBot.level = persistent.level;
-    matchBot.xp = persistent.xp;
-    matchBot.baseStats = { ...persistent.baseStats };
-    matchBot.traits = [...persistent.traits];
-    matchBot.affinities = updateAffinitiesAfterMatch(persistent, matchBot, placements.get(matchBot.id) ?? match.bots.length, match);
-    matchBot.career = { ...persistent.career };
-    matchBot.recentResults = [...persistent.recentResults];
   }
 
   savePersistentBots(pool);
   return pool;
+}
+
+export function applyPersistentBotMatchResult(
+  persistent: PersistentBot,
+  matchBot: Bot,
+  match: MatchState,
+  placement: number,
+  matchNumber?: number,
+): void {
+  persistent.relationships = cloneRelationships(matchBot.relationships);
+  const previousLevel = persistent.level;
+  const progressionResult = applyMatchProgression(
+    persistent,
+    matchBot,
+    placement,
+    match.bots.length,
+    match.winnerId === matchBot.id,
+  );
+  persistent.journal = addJournalEntry(
+    persistent.journal,
+    createMatchJournalEntry(persistent, matchBot, progressionResult, placement, match.bots.length, matchNumber, previousLevel),
+  );
+  persistent.affinities = updateAffinitiesAfterMatch(persistent, matchBot, placement, match);
+
+  matchBot.level = persistent.level;
+  matchBot.xp = persistent.xp;
+  matchBot.baseStats = { ...persistent.baseStats };
+  matchBot.traits = [...persistent.traits];
+  matchBot.affinities = cloneAffinities(persistent.affinities);
+  matchBot.career = { ...persistent.career };
+  matchBot.relationships = cloneRelationships(persistent.relationships);
+  matchBot.recentResults = [...persistent.recentResults];
 }
 
 export function clonePersistentBotForMatch(bot: PersistentBot, x: number, y: number): Bot {
@@ -154,33 +176,43 @@ export function addCustomPersistentBot(input: {
   return nextPool;
 }
 
+export function removeCustomPersistentBot(botId: string): PersistentBot[] {
+  const pool = loadPersistentBots();
+  const nextPool = pool.filter((bot) => bot.id !== botId || !bot.custom);
+  savePersistentBots(nextPool);
+  return nextPool;
+}
+
 export function updatePersistentBotDoctrine(botId: string, instruction: string): PersistentBot[] {
   const pool = loadPersistentBots();
-  const trimmed = instruction.trim().slice(0, 180);
   const nextPool = pool.map((bot) => {
     if (bot.id !== botId) {
       return bot;
     }
-
-    return {
-      ...bot,
-      tacticalInstruction: trimmed,
-      doctrineSummary: summarizeDoctrine(trimmed),
-      psychology: applyDoctrinePsychology(bot.psychology, trimmed),
-      affinities: applyDoctrineAffinities(bot.affinities, trimmed),
-      journal: addJournalEntry(bot.journal, {
-        id: `journal-${Date.now()}-training`,
-        timestamp: Date.now(),
-        title: "Doctrine updated",
-        body: trimmed
-          ? `New private instruction: "${trimmed}". Current read: ${summarizeDoctrine(trimmed)}.`
-          : "Doctrine cleared. This fighter will lean on its native instincts again.",
-        tone: "training",
-      }),
-    };
+    return applyPersistentBotDoctrine(bot, instruction);
   });
   savePersistentBots(nextPool);
   return nextPool;
+}
+
+export function applyPersistentBotDoctrine(bot: PersistentBot, instruction: string): PersistentBot {
+  const trimmed = instruction.trim().slice(0, 180);
+  return {
+    ...bot,
+    tacticalInstruction: trimmed,
+    doctrineSummary: summarizeDoctrine(trimmed),
+    psychology: applyDoctrinePsychology(bot.psychology, trimmed),
+    affinities: applyDoctrineAffinities(bot.affinities, trimmed),
+    journal: addJournalEntry(bot.journal, {
+      id: `journal-${Date.now()}-${bot.id}-training`,
+      timestamp: Date.now(),
+      title: "Doctrine updated",
+      body: trimmed
+        ? `New private instruction: "${trimmed}". Current read: ${summarizeDoctrine(trimmed)}.`
+        : "Doctrine cleared. This fighter will lean on its native instincts again.",
+      tone: "training",
+    }),
+  };
 }
 
 export function createDefaultPool(): PersistentBot[] {

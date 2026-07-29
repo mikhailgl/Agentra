@@ -1,5 +1,6 @@
 import { CONTEST_ENTRY_FEE } from "./constants";
 import { saveRemoteGameState } from "./remotePersistence";
+import type { SponsorDropKind } from "./simulation";
 import type { Bet, BetResolution, BetType, Bot, MatchState, Nudge, PlayerState } from "./types";
 
 const PLAYER_STORAGE_KEY = "ai-battle:player-state:v1";
@@ -7,6 +8,12 @@ const STARTING_CREDITS = 1000;
 export const MIN_BET_AMOUNT = 25;
 export const BOT_CONTEST_ENTRY_FEE = CONTEST_ENTRY_FEE;
 export const CUSTOM_BOT_CREATION_COST = CONTEST_ENTRY_FEE;
+export const SPONSOR_DROP_COSTS: Record<SponsorDropKind, number> = {
+  Knife: 35,
+  Spear: 50,
+  Bow: 65,
+  Medkit: 40,
+};
 export const DRAFT_COST = 300;
 export const MAX_DRAFTED_BOTS = 5;
 export const MAX_NUDGES_PER_MATCH = 3;
@@ -83,6 +90,10 @@ export function awardCredits(state: PlayerState, amount: number): PlayerState {
     return state;
   }
   return { ...state, credits: state.credits + creditAmount };
+}
+
+export function getSponsorDropCost(kind: SponsorDropKind): number {
+  return SPONSOR_DROP_COSTS[kind] ?? 50;
 }
 
 export function draftBot(state: PlayerState, botId: string): PlayerState | null {
@@ -250,6 +261,7 @@ function createDefaultPlayerState(): PlayerState {
     accountId: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     accountName: "Guest account",
     credits: STARTING_CREDITS,
+    ownedBotIds: [],
     favoriteBotIds: [],
     draftedBotIds: [],
     bets: [],
@@ -273,6 +285,7 @@ function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
     accountId,
     accountName,
     credits: Number.isFinite(state.credits) ? Math.max(0, Math.floor(state.credits ?? STARTING_CREDITS)) : fallback.credits,
+    ownedBotIds: Array.isArray(state.ownedBotIds) ? [...new Set(state.ownedBotIds.filter((id): id is string => typeof id === "string" && id.startsWith("custom-")))].slice(0, 100) : [],
     favoriteBotIds: Array.isArray(state.favoriteBotIds) ? [...new Set(state.favoriteBotIds.filter(Boolean))] : [],
     draftedBotIds: Array.isArray(state.draftedBotIds) ? [...new Set(state.draftedBotIds.filter(Boolean))].slice(0, MAX_DRAFTED_BOTS) : [],
     bets: Array.isArray(state.bets) ? state.bets.filter(isValidBet).map(normalizeBet) : [],

@@ -1,16 +1,10 @@
-import { LOOT_ZONE_RADIUS, MAP_CENTER, MAP_SIZE, WEAPONS } from "./constants";
+import { WEAPONS } from "./constants";
 import { getBiomeAt, getBiomeName } from "./biomes";
+import { getArenaCenter, getArenaScale, getMatchConfig } from "./matchConfig";
 import { createRng } from "./random";
 import { distance, randomPointInCircle } from "./math";
 import { createArenaMatchEvent, createNarrativeMatchEvent, emitMatchEvent, nextMatchEventBase } from "./matchEvents";
 import type { ArenaEvent, ArenaEventType, Bot, Creature, GameEvent, LootItem, MatchState, NarrativeMoment, Point } from "./types";
-
-const FIRST_EVENT_MIN_MS = 30_000;
-const EVENT_COOLDOWN_MS = 18_000;
-const MAX_ACTIVE_ARENA_EVENTS = 2;
-const NARRATIVE_LIMIT = 8;
-const ACTIVE_EVENT_LIMIT = 8;
-const DANGER_DAMAGE_PER_SECOND = 4.5;
 
 type LogArenaEvent = (message: string, debounceKey?: string, debounceMs?: number, meta?: Partial<GameEvent>) => void;
 
@@ -45,7 +39,7 @@ export function addNarrativeMoment(
     ...moment,
   };
   match.nextEventId += 1;
-  match.narrativeMoments = [narrative, ...(match.narrativeMoments ?? [])].slice(0, NARRATIVE_LIMIT);
+  match.narrativeMoments = [narrative, ...(match.narrativeMoments ?? [])].slice(0, getMatchConfig(match).events.narrativeLimit);
   if (narrative.severity !== "info") {
     emitMatchEvent(match, createNarrativeMatchEvent(narrative, nextMatchEventBase(match, "narrative")));
   }
@@ -53,11 +47,12 @@ export function addNarrativeMoment(
 }
 
 export function isPointInActiveDangerZone(match: MatchState, point: Point): boolean {
-  return getActiveDangerZones(match).some((event) => isPointInsideArenaEvent(event, point));
+  return getActiveDangerZones(match).some((event) => isPointInsideArenaEvent(match, event, point));
 }
 
 export function getActiveDangerZoneEscapeTarget(match: MatchState, bot: Bot): Point | null {
-  const danger = getActiveDangerZones(match).find((event) => isPointInsideArenaEvent(event, bot));
+  const config = getMatchConfig(match);
+  const danger = getActiveDangerZones(match).find((event) => isPointInsideArenaEvent(match, event, bot));
   if (!danger?.location) {
     return null;
   }
@@ -66,9 +61,9 @@ export function getActiveDangerZoneEscapeTarget(match: MatchState, bot: Bot): Po
   const dy = bot.y - danger.location.z;
   const length = Math.max(1, Math.hypot(dx, dy));
   return clampPoint({
-    x: bot.x + (dx / length) * 180,
-    y: bot.y + (dy / length) * 180,
-  });
+    x: bot.x + (dx / length) * 180 * getArenaScale(config),
+    y: bot.y + (dy / length) * 180 * getArenaScale(config),
+  }, config);
 }
 
 export function getBountyTargetId(match: MatchState): string | null {
@@ -84,38 +79,61 @@ export function isSuddenDeathActive(match: MatchState): boolean {
 
 function triggerPacingEvent(match: MatchState, log: LogArenaEvent): void {
   if (match.ended) return;
+  const config = getMatchConfig(match);
+  const arenaScale = getArenaScale(config);
   const living = match.bots.filter((bot) => bot.alive);
-  if (living.length <= 1) return;
+  if (living.length <= config.rules.winnersRemaining) return;
 
   const activeEvents = (match.arenaEvents ?? []).filter((event) => isArenaEventActive(match, event));
   const lastEventAt = match.matchEventState.lastArenaEventAtMs;
-  if (activeEvents.length >= MAX_ACTIVE_ARENA_EVENTS || match.elapsedMs - lastEventAt < EVENT_COOLDOWN_MS) {
+  if (activeEvents.length >= config.events.maxActiveArenaEvents || match.elapsedMs - lastEventAt < config.events.eventCooldownMs) {
     return;
   }
 
-  if (!match.matchEventState.firstArenaEventEmitted && match.elapsedMs >= FIRST_EVENT_MIN_MS) {
-    const type = averageLivingBotDistance(living) > 365 ? "rare_loot_drop" : "monster_spawn";
-    startArenaEvent(match, type, log, "first_event");
+  if (!match.matchEventState.firstArenaEventEmitted && match.elapsedMs >= config.events.firstEventMinMs) {
+    const type = averageLivingBotDistance(living) > 365 * arenaScale ? "rare_loot_drop" : "monster_spawn";
+    startFirstAllowedArenaEvent(match, [type, type === "rare_loot_drop" ? "monster_spawn" : "rare_loot_drop"], log, "first_event");
     return;
   }
 
   const timeSinceKill = match.elapsedMs - (match.matchEventState.lastKillAtMs || 0);
   if (match.elapsedMs > 36_000 && timeSinceKill > 30_000) {
-    startArenaEvent(match, match.matchEventState.eventCounts.rare_loot_drop ? "monster_spawn" : "rare_loot_drop", log, "stalled_kills");
+    const type = match.matchEventState.eventCounts.rare_loot_drop ? "monster_spawn" : "rare_loot_drop";
+    startFirstAllowedArenaEvent(match, [type, type === "rare_loot_drop" ? "monster_spawn" : "rare_loot_drop"], log, "stalled_kills");
     return;
   }
 
-  if (match.elapsedMs > 42_000 && averageLivingBotDistance(living) > 390) {
-    startArenaEvent(match, "rare_loot_drop", log, "spread_out");
+  if (match.elapsedMs > 42_000 && averageLivingBotDistance(living) > 390 * arenaScale) {
+    startFirstAllowedArenaEvent(match, ["rare_loot_drop", "monster_spawn"], log, "spread_out");
     return;
   }
 
   if (living.length >= 3 && living.length <= 5 && match.elapsedMs > 55_000) {
-    startArenaEvent(match, match.matchEventState.suddenDeathStarted ? "danger_zone" : "sudden_death", log, "late_match");
+    const type = match.matchEventState.suddenDeathStarted ? "danger_zone" : "sudden_death";
+    startFirstAllowedArenaEvent(match, [type, type === "danger_zone" ? "sudden_death" : "danger_zone"], log, "late_match");
   }
 }
 
+function startFirstAllowedArenaEvent(
+  match: MatchState,
+  preferredTypes: ArenaEventType[],
+  log: LogArenaEvent,
+  reason: string,
+): ArenaEvent | null {
+  const allowedTypes = getMatchConfig(match).events.allowedArenaEvents;
+  const candidates = [...new Set([...preferredTypes, ...allowedTypes])];
+  for (const type of candidates) {
+    if (!allowedTypes.includes(type)) continue;
+    const event = startArenaEvent(match, type, log, reason);
+    if (event) return event;
+  }
+  return null;
+}
+
 function startArenaEvent(match: MatchState, type: ArenaEventType, log: LogArenaEvent, reason: string): ArenaEvent | null {
+  if (!getMatchConfig(match).events.allowedArenaEvents.includes(type)) {
+    return null;
+  }
   if (type === "monster_spawn") return startMonsterSpawn(match, log, reason);
   if (type === "rare_loot_drop") return startRareLootDrop(match, log, reason);
   if (type === "danger_zone") return startDangerZone(match, log, reason);
@@ -125,10 +143,13 @@ function startArenaEvent(match: MatchState, type: ArenaEventType, log: LogArenaE
 }
 
 function startMonsterSpawn(match: MatchState, log: LogArenaEvent, reason: string): ArenaEvent {
+  const config = getMatchConfig(match);
+  const arenaScale = getArenaScale(config);
   const living = match.bots.filter((bot) => bot.alive);
-  const center = living.length ? centerOfBots(living) : { x: MAP_CENTER, y: MAP_CENTER };
+  const arenaCenter = getArenaCenter(config);
+  const center = living.length ? centerOfBots(living) : { x: arenaCenter, y: arenaCenter };
   const zone = getBiomeAt(center, match.zones);
-  const point = randomPointInCircle(center, 120, createRng(hashSeed(`${match.id}:monster:${match.nextEventId}:${reason}`)));
+  const point = randomPointInCircle(center, 120 * arenaScale, createRng(hashSeed(`${match.id}:monster:${match.nextEventId}:${reason}`)), config);
   const event = pushArenaEvent(match, {
     type: "monster_spawn",
     title: `WOLF PACK ENTERING ${zone.name.toUpperCase()}`,
@@ -139,8 +160,8 @@ function startMonsterSpawn(match: MatchState, log: LogArenaEvent, reason: string
     severity: "major",
   });
 
-  for (let index = 0; index < 3; index += 1) {
-    const spawn = randomPointInCircle(point, 42 + index * 10, createRng(hashSeed(`${event.id}:creature:${index}`)));
+  for (let index = 0; index < config.events.monsterPackSize; index += 1) {
+    const spawn = randomPointInCircle(point, (42 + index * 10) * arenaScale, createRng(hashSeed(`${event.id}:creature:${index}`)), config);
     match.creatures.push(createCreature(match, event, zone.id, spawn.x, spawn.y, index));
   }
 
@@ -156,7 +177,9 @@ function startMonsterSpawn(match: MatchState, log: LogArenaEvent, reason: string
 }
 
 function startRareLootDrop(match: MatchState, log: LogArenaEvent, reason: string): ArenaEvent {
-  const point = reason === "spread_out" ? { x: MAP_CENTER, y: MAP_CENTER } : pickVisiblePoint(match, "loot");
+  const config = getMatchConfig(match);
+  const arenaCenter = getArenaCenter(config);
+  const point = reason === "spread_out" ? { x: arenaCenter, y: arenaCenter } : pickVisiblePoint(match, "loot");
   const zone = getBiomeAt(point, match.zones);
   const loot = createRareLoot(match, point.x, point.y);
   match.loot.push(loot);
@@ -183,16 +206,18 @@ function startRareLootDrop(match: MatchState, log: LogArenaEvent, reason: string
 }
 
 function startDangerZone(match: MatchState, log: LogArenaEvent, reason: string): ArenaEvent {
+  const config = getMatchConfig(match);
   const living = match.bots.filter((bot) => bot.alive);
   const target = living.length ? living[Math.floor(createRng(hashSeed(`${match.id}:danger:${match.nextEventId}:${reason}`))() * living.length)] : null;
   const point = target ? { x: target.x, y: target.y } : pickVisiblePoint(match, "danger");
   const zone = getBiomeAt(point, match.zones);
-  const affectedBotIds = living.filter((bot) => distance(bot, point) <= 145).map((bot) => bot.id);
+  const affectedBotIds = living.filter((bot) => distance(bot, point) <= config.events.dangerZoneRadius).map((bot) => bot.id);
   const event = pushArenaEvent(match, {
     type: "danger_zone",
     title: `${zone.name.toUpperCase()} IS NOW DANGEROUS`,
     description: `${zone.name} became unstable.`,
     location: { x: point.x, z: point.y },
+    radius: config.events.dangerZoneRadius,
     regionName: zone.name,
     durationMs: 20_000,
     severity: "critical",
@@ -223,16 +248,17 @@ function startBounty(match: MatchState, log: LogArenaEvent, reason: string): Are
 }
 
 function startSuddenDeath(match: MatchState, log: LogArenaEvent, reason: string): ArenaEvent {
+  const arenaCenter = getArenaCenter(getMatchConfig(match));
   const event = pushArenaEvent(match, {
     type: "sudden_death",
     title: "SUDDEN DEATH: HEALING REDUCED",
     description: "Sudden death has begun.",
-    location: { x: MAP_CENTER, z: MAP_CENTER },
+    location: { x: arenaCenter, z: arenaCenter },
     durationMs: 60_000,
     severity: "critical",
   });
   match.matchEventState.suddenDeathStarted = true;
-  log(event.description, undefined, 0, { kind: "system", x: MAP_CENTER, y: MAP_CENTER, label: "Sudden Death" });
+  log(event.description, undefined, 0, { kind: "system", x: arenaCenter, y: arenaCenter, label: "Sudden Death" });
   announceArenaEvent(match, event);
   addNarrativeMoment(match, {
     title: "Sudden death has begun",
@@ -250,7 +276,7 @@ function pushArenaEvent(match: MatchState, event: Omit<ArenaEvent, "id" | "start
     ...event,
   };
   match.nextEventId += 1;
-  match.arenaEvents = [arenaEvent, ...(match.arenaEvents ?? [])].slice(0, ACTIVE_EVENT_LIMIT);
+  match.arenaEvents = [arenaEvent, ...(match.arenaEvents ?? [])].slice(0, getMatchConfig(match).events.activeEventLimit);
   match.matchEventState.lastArenaEventAtMs = match.elapsedMs;
   match.matchEventState.firstArenaEventEmitted = true;
   match.matchEventState.eventCounts[arenaEvent.type] = (match.matchEventState.eventCounts[arenaEvent.type] ?? 0) + 1;
@@ -281,10 +307,11 @@ function expireArenaEvents(match: MatchState, log: LogArenaEvent): void {
 }
 
 function applyDangerZones(match: MatchState, deltaMs: number, log: LogArenaEvent): void {
+  const config = getMatchConfig(match);
   for (const event of getActiveDangerZones(match)) {
-    for (const bot of match.bots.filter((candidate) => candidate.alive && isPointInsideArenaEvent(event, candidate))) {
+    for (const bot of match.bots.filter((candidate) => candidate.alive && isPointInsideArenaEvent(match, event, candidate))) {
       const previousHealth = bot.health;
-      bot.health = Math.max(1, bot.health - DANGER_DAMAGE_PER_SECOND * (deltaMs / 1000));
+      bot.health = Math.max(1, bot.health - config.events.dangerDamagePerSecond * (deltaMs / 1000));
       const escapeTarget = getActiveDangerZoneEscapeTarget(match, bot);
       if (escapeTarget) bot.wanderTarget = escapeTarget;
       if (Math.floor(previousHealth) !== Math.floor(bot.health)) {
@@ -340,9 +367,10 @@ function createCreature(match: MatchState, event: ArenaEvent, biome: Creature["b
 }
 
 function pickVisiblePoint(match: MatchState, salt: string): Point {
+  const config = getMatchConfig(match);
   const rng = createRng(hashSeed(`${match.id}:${salt}:${match.nextEventId}`));
   const zone = match.zones[Math.floor(rng() * match.zones.length)];
-  return randomPointInCircle({ x: zone.x + (zone.width ?? 0) / 2, y: zone.y + (zone.height ?? 0) / 2 }, zone.radius ?? LOOT_ZONE_RADIUS, rng);
+  return randomPointInCircle({ x: zone.x + (zone.width ?? 0) / 2, y: zone.y + (zone.height ?? 0) / 2 }, zone.radius ?? config.arena.lootZoneRadius, rng, config);
 }
 
 function getActiveDangerZones(match: MatchState): ArenaEvent[] {
@@ -353,9 +381,9 @@ function isArenaEventActive(match: MatchState, event: ArenaEvent): boolean {
   return !event.durationMs || event.startedAt + event.durationMs > match.elapsedMs;
 }
 
-function isPointInsideArenaEvent(event: ArenaEvent, point: Point): boolean {
+function isPointInsideArenaEvent(match: MatchState, event: ArenaEvent, point: Point): boolean {
   if (!event.location) return false;
-  return distance(point, { x: event.location.x, y: event.location.z }) <= 145;
+  return distance(point, { x: event.location.x, y: event.location.z }) <= (event.radius ?? getMatchConfig(match).events.dangerZoneRadius);
 }
 
 function centerOfBots(bots: Bot[]): Point {
@@ -377,10 +405,10 @@ function averageLivingBotDistance(bots: Bot[]): number {
   return count ? total / count : 0;
 }
 
-function clampPoint(point: Point): Point {
+function clampPoint(point: Point, config = getMatchConfig()): Point {
   return {
-    x: Math.max(0, Math.min(MAP_SIZE, point.x)),
-    y: Math.max(0, Math.min(MAP_SIZE, point.y)),
+    x: Math.max(0, Math.min(config.arena.size, point.x)),
+    y: Math.max(0, Math.min(config.arena.size, point.y)),
   };
 }
 

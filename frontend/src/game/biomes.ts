@@ -1,5 +1,5 @@
-import { MAP_SIZE } from "./constants";
-import type { BiomeDefinition, BiomeType, MapZone, Point } from "./types";
+import { DEFAULT_MATCH_CONFIG, getArenaScale, resolveMatchConfig, type MatchConfigInput } from "./matchConfig";
+import type { BiomeDefinition, BiomeType, MatchConfig, MapZone, Point } from "./types";
 
 export const BIOMES: Record<BiomeType, BiomeDefinition> = {
   forest: {
@@ -46,16 +46,17 @@ export const BIOMES: Record<BiomeType, BiomeDefinition> = {
   },
 };
 
-export function createMapZones(): MapZone[] {
-  return [
-    { ...BIOMES.forest, x: 30, y: 40, width: 330, height: 330 },
-    { ...BIOMES.open_field, x: 365, y: 65, width: 330, height: 300 },
-    { ...BIOMES.high_ground, x: 705, y: 20, width: 255, height: 335 },
-    { ...BIOMES.swamp, x: 45, y: 410, width: 315, height: 320 },
-    { ...BIOMES.ruins, x: 390, y: 390, radius: 170 },
-    { ...BIOMES.industrial_yard, x: 655, y: 390, width: 300, height: 285 },
-    { ...BIOMES.cave, x: 330, y: 735, width: 360, height: 210 },
-  ];
+export function createMapZones(configInput?: MatchConfigInput | MatchConfig): MapZone[] {
+  const config = resolveMatchConfig(configInput);
+  const scale = getArenaScale(config);
+  return config.arena.zones.map((zone) => ({
+    ...BIOMES[zone.biome],
+    x: zone.x * scale,
+    y: zone.y * scale,
+    width: zone.width === undefined ? undefined : zone.width * scale,
+    height: zone.height === undefined ? undefined : zone.height * scale,
+    radius: zone.radius === undefined ? undefined : zone.radius * scale,
+  }));
 }
 
 export function getBiomeAt(point: Point, zones: MapZone[]): MapZone {
@@ -66,10 +67,10 @@ export function getBiomeName(id: BiomeType | undefined): string {
   return id ? BIOMES[id].name : "Unknown";
 }
 
-export function clampToMap(point: Point): Point {
+export function clampToMap(point: Point, config: MatchConfig = DEFAULT_MATCH_CONFIG): Point {
   return {
-    x: Math.max(18, Math.min(MAP_SIZE - 18, point.x)),
-    y: Math.max(18, Math.min(MAP_SIZE - 18, point.y)),
+    x: Math.max(config.arena.edgePadding, Math.min(config.arena.size - config.arena.edgePadding, point.x)),
+    y: Math.max(config.arena.edgePadding, Math.min(config.arena.size - config.arena.edgePadding, point.y)),
   };
 }
 

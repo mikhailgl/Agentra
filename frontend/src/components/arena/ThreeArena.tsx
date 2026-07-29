@@ -2,7 +2,6 @@ import { Environment, Grid } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Suspense } from "react";
 import * as THREE from "three";
-import { ARENA_WORLD_SIZE } from "../../lib/simulation/simulationTo3D";
 import type { ArenaViewModel, CameraMode } from "../../lib/simulation/types";
 import { ArenaCreature } from "./ArenaCreature";
 import { ArenaEventMarker } from "./ArenaEventMarker";
@@ -29,6 +28,7 @@ export function ThreeArena({
   const recentVisualEvents = arena.events
     .filter((event) => ["damage", "kill", "loot", "winner", "player", "system", "avoid"].includes(event.kind))
     .slice(0, 10);
+  const worldSize = arena.worldSize;
 
   return (
     <div className="three-arena">
@@ -48,7 +48,7 @@ export function ThreeArena({
         />
         <group>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[ARENA_WORLD_SIZE, ARENA_WORLD_SIZE]} />
+            <planeGeometry args={[worldSize, worldSize]} />
             <meshStandardMaterial color="#233126" roughness={0.94} />
           </mesh>
           {arena.zones.map((zone) => (
@@ -57,8 +57,8 @@ export function ThreeArena({
               <meshStandardMaterial color={zone.color} transparent opacity={0.42} roughness={1} />
             </mesh>
           ))}
-          <Grid args={[ARENA_WORLD_SIZE, ARENA_WORLD_SIZE]} cellSize={2.5} sectionSize={10} fadeDistance={52} fadeStrength={1.6} infiniteGrid={false} position={[0, 0.018, 0]} />
-          <ArenaWalls />
+          <Grid args={[worldSize, worldSize]} cellSize={2.5} sectionSize={10} fadeDistance={52} fadeStrength={1.6} infiniteGrid={false} position={[0, 0.018, 0]} />
+          <ArenaWalls worldSize={worldSize} />
           <ArenaObstacles />
           {arena.arenaEvents.map((event) => (
             <ArenaEventMarker key={event.id} event={event} />
@@ -81,25 +81,25 @@ export function ThreeArena({
   );
 }
 
-function ArenaWalls() {
-  const half = ARENA_WORLD_SIZE / 2;
+function ArenaWalls({ worldSize }: { worldSize: number }) {
+  const half = worldSize / 2;
   const wall = 0.45;
   return (
     <group>
       <mesh position={[0, 0.7, -half]} castShadow receiveShadow>
-        <boxGeometry args={[ARENA_WORLD_SIZE, 1.4, wall]} />
+        <boxGeometry args={[worldSize, 1.4, wall]} />
         <meshStandardMaterial color="#3f3f46" roughness={0.75} />
       </mesh>
       <mesh position={[0, 0.7, half]} castShadow receiveShadow>
-        <boxGeometry args={[ARENA_WORLD_SIZE, 1.4, wall]} />
+        <boxGeometry args={[worldSize, 1.4, wall]} />
         <meshStandardMaterial color="#3f3f46" roughness={0.75} />
       </mesh>
       <mesh position={[-half, 0.7, 0]} castShadow receiveShadow>
-        <boxGeometry args={[wall, 1.4, ARENA_WORLD_SIZE]} />
+        <boxGeometry args={[wall, 1.4, worldSize]} />
         <meshStandardMaterial color="#3f3f46" roughness={0.75} />
       </mesh>
       <mesh position={[half, 0.7, 0]} castShadow receiveShadow>
-        <boxGeometry args={[wall, 1.4, ARENA_WORLD_SIZE]} />
+        <boxGeometry args={[wall, 1.4, worldSize]} />
         <meshStandardMaterial color="#3f3f46" roughness={0.75} />
       </mesh>
     </group>
