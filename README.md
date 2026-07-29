@@ -141,7 +141,7 @@ https://your-production-app.vercel.app,https://your-preview-app.vercel.app,http:
 ### Vercel Frontend
 
 1. Import the GitHub repo in Vercel.
-2. Use the repo root as the Vercel project root. The committed `vercel.json` builds `frontend/` and outputs `frontend/dist`.
+2. Set `frontend` as the Vercel project root. The committed `vercel.json` installs and builds from that directory and outputs `dist`.
 3. Set this Vercel environment variable:
    - `VITE_API_BASE_URL=https://your-render-service.onrender.com`
 4. Vercel Git integration will create preview deployments for branches/PRs and production deployments from `main`.
