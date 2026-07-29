@@ -17,6 +17,7 @@ Durable persistence lives in Supabase Postgres:
 - `arena_states` stores the current resumable arena phase snapshot.
 - `arena_queues` stores queued bot ids.
 - `match_results` stores recent match summaries.
+- `match_logs` stores full completed-match timelines, highlights, entrants, and result stats for video/script generation.
 
 The browser still keeps a localStorage cache so the app starts instantly and can migrate existing local state, but localStorage is no longer the production source of truth. When `VITE_API_BASE_URL` is configured, the frontend syncs durable mutations to the backend, and the backend writes them to Supabase. Redeploying Vercel or Render does not wipe game state because neither service stores important state on local disk.
 
@@ -59,9 +60,35 @@ npm run build
 Local URLs:
 
 - Frontend: `http://localhost:5173`
-- Backend health check: `http://localhost:4000/health`
+- Backend health check: `http://localhost:4000/health` (`ready: true` means the arena engine has restored its checkpoint and started)
+- Recent match logs: `http://localhost:4000/api/match-logs`
 
-If you want to run the frontend without backend persistence, leave `VITE_API_BASE_URL` empty. The app will still work with local cache only, but that mode is not production-durable.
+The live arena requires `VITE_API_BASE_URL`. Browser localStorage is a startup cache for player and roster state, not a replacement for the authoritative arena engine.
+
+## Match Configuration
+
+Core match knobs live in `frontend/src/game/matchConfig.ts`.
+
+Change `DEFAULT_MATCH_CONFIG` to adjust the default arena, or pass a partial config to `createMatch` / `createMatchFromPool` for one-off match variants. The config covers:
+
+- Bot counts and persistent roster size.
+- Arena size, spawn radius, loot-zone radius, edge padding, and biome zones.
+- Initial loot count, pickup radius, and sponsor-drop radius.
+- Win condition, final-phase threshold, and visible event log length.
+- Bot AI ranges, wander radius, social scan range, and alliance timing.
+- Arena event pacing, enabled event types, danger-zone damage/radius, and monster pack size.
+
+Example:
+
+```ts
+createMatch(undefined, 0, {
+  name: "Tiny Duel Pit",
+  roster: { matchBotCount: 2 },
+  arena: { size: 520, spawnRadius: 190 },
+  loot: { initialCount: 3 },
+  events: { allowedArenaEvents: ["rare_loot_drop", "danger_zone"] },
+});
+```
 
 ## Deployment
 
@@ -73,7 +100,7 @@ Production branch convention:
 ### Supabase
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/20260505000000_initial_game_state.sql` in the Supabase SQL editor, or apply it with the Supabase CLI.
+2. Apply every SQL file in `supabase/migrations/` in timestamp order using the Supabase SQL editor or CLI.
 3. Copy the project URL.
 4. Copy the service role key for the backend only. Never expose it in Vercel or frontend code.
 
@@ -114,7 +141,7 @@ https://your-production-app.vercel.app,https://your-preview-app.vercel.app,http:
 ### Vercel Frontend
 
 1. Import the GitHub repo in Vercel.
-2. Use the repo root as the Vercel project root. The committed `vercel.json` builds `frontend/` and outputs `frontend/dist`.
+2. Set `frontend` as the Vercel project root. The committed `vercel.json` installs and builds from that directory and outputs `dist`.
 3. Set this Vercel environment variable:
    - `VITE_API_BASE_URL=https://your-render-service.onrender.com`
 4. Vercel Git integration will create preview deployments for branches/PRs and production deployments from `main`.
@@ -125,6 +152,7 @@ The repo includes `.github/workflows/ci.yml`, which runs on pull requests and pu
 
 ```bash
 npm ci
+npm test
 npm run typecheck
 npm run build
 ```

@@ -1,4 +1,4 @@
-import { ALLIANCE_MAX_MS, ALLIANCE_MIN_MS, SOCIAL_SCAN_RANGE } from "./constants";
+import { getMatchConfig } from "./matchConfig";
 import { distance } from "./math";
 import { areAllied, getActiveAlly, getPerceptionRange, getRelationship } from "./relationships";
 import { getTraitModifier } from "./traits";
@@ -14,6 +14,7 @@ export type SocialDecision =
   | { action: "ignore" };
 
 export function evaluateSocialDecision(bot: Bot, match: MatchState): SocialDecision {
+  const config = getMatchConfig(match);
   const ally = getActiveAlly(bot, match);
   if (ally) {
     const betrayal = scoreBetrayal(bot, ally);
@@ -45,7 +46,7 @@ export function evaluateSocialDecision(bot: Bot, match: MatchState): SocialDecis
       action: "propose_alliance",
       target,
       reason: estimateBotStrength(target) >= estimateBotStrength(bot) ? "strong ally" : "mutual safety",
-      durationMs: ALLIANCE_MIN_MS + Math.floor((1 - bot.psychology.loyalty + bot.psychology.sociability) * 0.5 * (ALLIANCE_MAX_MS - ALLIANCE_MIN_MS)),
+      durationMs: config.ai.allianceMinMs + Math.floor((1 - bot.psychology.loyalty + bot.psychology.sociability) * 0.5 * (config.ai.allianceMaxMs - config.ai.allianceMinMs)),
     };
   }
   if (best.key === "follow" && best.value > 0.58) return { action: "follow", target, reason: "respect" };
@@ -73,7 +74,8 @@ export function shouldRefuseAttackForTrust(attacker: Bot, target: Bot, match: Ma
 }
 
 function nearbyBots(bot: Bot, match: MatchState): Bot[] {
-  const range = Math.max(SOCIAL_SCAN_RANGE, getPerceptionRange(bot));
+  const config = getMatchConfig(match);
+  const range = Math.max(config.ai.socialScanRange, getPerceptionRange(bot, config));
   return match.bots.filter(
     (candidate) => candidate.alive && candidate.id !== bot.id && distance(bot, candidate) <= range,
   );

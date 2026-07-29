@@ -1,6 +1,6 @@
-import { SOCIAL_SCAN_RANGE } from "./constants";
+import { DEFAULT_MATCH_CONFIG, getMatchConfig } from "./matchConfig";
 import { distance } from "./math";
-import type { Bot, GameEvent, MatchState, Relationship } from "./types";
+import type { Bot, GameEvent, MatchConfig, MatchState, Relationship } from "./types";
 
 export function getRelationship(bot: Bot, otherId: string): Relationship {
   bot.relationships ??= {};
@@ -67,9 +67,10 @@ export function recordAttack(attacker: Bot, target: Bot): void {
 }
 
 export function recordKill(match: MatchState, killer: Bot, victim: Bot, victimStrength: number): void {
+  const config = getMatchConfig(match);
   const strongKill = victimStrength > 95;
   for (const witness of match.bots) {
-    if (!witness.alive || witness.id === killer.id || distance(witness, killer) > getPerceptionRange(witness)) continue;
+    if (!witness.alive || witness.id === killer.id || distance(witness, killer) > getPerceptionRange(witness, config)) continue;
     adjustRelationship(witness, killer.id, {
       fear: strongKill ? 0.12 : 0.06,
       respect: strongKill ? 0.12 : 0.05,
@@ -80,8 +81,9 @@ export function recordKill(match: MatchState, killer: Bot, victim: Bot, victimSt
 }
 
 export function recordFlee(match: MatchState, fleeingBot: Bot): void {
+  const config = getMatchConfig(match);
   for (const witness of match.bots) {
-    if (!witness.alive || witness.id === fleeingBot.id || distance(witness, fleeingBot) > getPerceptionRange(witness)) continue;
+    if (!witness.alive || witness.id === fleeingBot.id || distance(witness, fleeingBot) > getPerceptionRange(witness, config)) continue;
     adjustRelationship(witness, fleeingBot.id, { respect: -0.015, familiarity: 0.01 });
   }
 }
@@ -139,8 +141,8 @@ export function summarizeRelationships(bot: Bot, bots: Bot[]) {
   };
 }
 
-export function getPerceptionRange(bot: Bot): number {
-  return SOCIAL_SCAN_RANGE + bot.baseStats.perception * 8;
+export function getPerceptionRange(bot: Bot, config: MatchConfig = DEFAULT_MATCH_CONFIG): number {
+  return config.ai.socialScanRange + bot.baseStats.perception * 8;
 }
 
 function label(id: string | null, names: Map<string, string>): string {

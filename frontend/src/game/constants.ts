@@ -1,25 +1,26 @@
 import type { Personality, Weapon } from "./types";
+import { DEFAULT_MATCH_CONFIG, getArenaCenter } from "./matchConfig";
 
-export const MAP_SIZE = 1000;
-export const MAP_CENTER = MAP_SIZE / 2;
-export const BOT_COUNT = 12;
-export const PERSISTENT_BOT_COUNT = 20;
-export const LOOT_COUNT = 10;
-export const LOOT_ZONE_RADIUS = 180;
-export const SPAWN_RADIUS = 390;
+export const MAP_SIZE = DEFAULT_MATCH_CONFIG.arena.size;
+export const MAP_CENTER = getArenaCenter(DEFAULT_MATCH_CONFIG);
+export const BOT_COUNT = DEFAULT_MATCH_CONFIG.roster.matchBotCount;
+export const PERSISTENT_BOT_COUNT = DEFAULT_MATCH_CONFIG.roster.persistentBotCount;
+export const LOOT_COUNT = DEFAULT_MATCH_CONFIG.loot.initialCount;
+export const LOOT_ZONE_RADIUS = DEFAULT_MATCH_CONFIG.arena.lootZoneRadius;
+export const SPAWN_RADIUS = DEFAULT_MATCH_CONFIG.arena.spawnRadius;
 export const BOT_RADIUS = 14;
-export const LOOT_PICKUP_RADIUS = 24;
-export const VISIBLE_ENEMY_RANGE = 360;
-export const FLEE_ENEMY_RANGE = 150;
-export const WANDER_TARGET_RADIUS = 120;
-export const MAX_EVENTS = 18;
+export const LOOT_PICKUP_RADIUS = DEFAULT_MATCH_CONFIG.loot.pickupRadius;
+export const VISIBLE_ENEMY_RANGE = DEFAULT_MATCH_CONFIG.ai.visibleEnemyRange;
+export const FLEE_ENEMY_RANGE = DEFAULT_MATCH_CONFIG.ai.fleeEnemyRange;
+export const WANDER_TARGET_RADIUS = DEFAULT_MATCH_CONFIG.ai.wanderTargetRadius;
+export const MAX_EVENTS = DEFAULT_MATCH_CONFIG.rules.maxVisibleEvents;
 export const EVENT_DEBOUNCE_MS = 1800;
 export const MEDKIT_HEAL = 35;
-export const SPONSOR_DROP_RADIUS = 48;
-export const CONTEST_ENTRY_FEE = 50;
-export const SOCIAL_SCAN_RANGE = 240;
-export const ALLIANCE_MIN_MS = 22_000;
-export const ALLIANCE_MAX_MS = 42_000;
+export const SPONSOR_DROP_RADIUS = DEFAULT_MATCH_CONFIG.loot.sponsorDropRadius;
+export const CONTEST_ENTRY_FEE = 25;
+export const SOCIAL_SCAN_RANGE = DEFAULT_MATCH_CONFIG.ai.socialScanRange;
+export const ALLIANCE_MIN_MS = DEFAULT_MATCH_CONFIG.ai.allianceMinMs;
+export const ALLIANCE_MAX_MS = DEFAULT_MATCH_CONFIG.ai.allianceMaxMs;
 
 export const WEAPONS: Weapon[] = [
   { name: "Knife", damage: 10, range: 42, cooldownMs: 420, accuracy: 0.86 },

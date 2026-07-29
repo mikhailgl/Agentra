@@ -34,12 +34,13 @@ function isArenaCheckpoint(value: unknown): value is ArenaCheckpoint {
 
   const checkpoint = value as Partial<ArenaCheckpoint>;
   return (
-    checkpoint.version === 1 &&
+    (checkpoint.version === 1 || checkpoint.version === 2) &&
     typeof checkpoint.matchNumber === "number" &&
     Boolean(checkpoint.match && typeof checkpoint.match === "object") &&
     Boolean(checkpoint.arenaState && typeof checkpoint.arenaState === "object") &&
     Array.isArray(checkpoint.arenaQueueIds) &&
     Array.isArray(checkpoint.basicResults) &&
+    (checkpoint.persistentBots === undefined || Array.isArray(checkpoint.persistentBots)) &&
     typeof checkpoint.savedAt === "number"
   );
 }

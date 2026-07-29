@@ -53,6 +53,62 @@ export type MapZone = BiomeDefinition & {
   height?: number;
 };
 
+export type ArenaZoneConfig = {
+  biome: BiomeType;
+  x: number;
+  y: number;
+  radius?: number;
+  width?: number;
+  height?: number;
+};
+
+export type MatchConfig = {
+  id: string;
+  name: string;
+  roster: {
+    matchBotCount: number;
+    persistentBotCount: number;
+  };
+  arena: {
+    size: number;
+    zoneBaseSize: number;
+    spawnRadius: number;
+    lootZoneRadius: number;
+    edgePadding: number;
+    zones: ArenaZoneConfig[];
+  };
+  loot: {
+    initialCount: number;
+    bonusInitialLoot: number;
+    pickupRadius: number;
+    sponsorDropRadius: number;
+  };
+  rules: {
+    winnersRemaining: number;
+    finalPhaseBotCount: number;
+    maxVisibleEvents: number;
+  };
+  ai: {
+    visibleEnemyRange: number;
+    fleeEnemyRange: number;
+    wanderTargetRadius: number;
+    socialScanRange: number;
+    allianceMinMs: number;
+    allianceMaxMs: number;
+  };
+  events: {
+    firstEventMinMs: number;
+    eventCooldownMs: number;
+    maxActiveArenaEvents: number;
+    narrativeLimit: number;
+    activeEventLimit: number;
+    dangerDamagePerSecond: number;
+    dangerZoneRadius: number;
+    monsterPackSize: number;
+    allowedArenaEvents: ArenaEventType[];
+  };
+};
+
 export type BotAffinities = {
   biomes: Partial<Record<BiomeType, number>>;
   weapons: Record<string, number>;
@@ -343,6 +399,7 @@ export type PlayerState = {
   accountId: string;
   accountName: string;
   credits: number;
+  ownedBotIds: string[];
   favoriteBotIds: string[];
   draftedBotIds: string[];
   bets: Bet[];
@@ -386,8 +443,48 @@ export type BasicMatchResult = {
   endedAt: number;
 };
 
+export type MatchLogEntrant = {
+  botId: string;
+  name: string;
+  level: number;
+  custom?: boolean;
+  traits: string[];
+};
+
+export type MatchLogBotResult = {
+  botId: string;
+  name: string;
+  alive: boolean;
+  kills: number;
+  damageDealt: number;
+  survivalTimeMs: number;
+  finalHealth: number;
+  carriedCredits: number;
+};
+
+export type MatchLog = {
+  version: 1;
+  id: string;
+  matchId: string;
+  matchNumber: number;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  winnerBotId: string | null;
+  winnerName: string | null;
+  entrants: MatchLogEntrant[];
+  botResults: MatchLogBotResult[];
+  events: GameEvent[];
+  highlights: MatchEvent[];
+  narrativeMoments: NarrativeMoment[];
+  arenaEvents: ArenaEvent[];
+};
+
 export type MatchState = {
   id: string;
+  config?: MatchConfig;
+  entryFeeCredits: number;
+  prizePoolCredits: number;
   bots: Bot[];
   loot: LootItem[];
   zones: MapZone[];
@@ -397,6 +494,7 @@ export type MatchState = {
   creatures: Creature[];
   learningEvents: string[];
   events: GameEvent[];
+  logEvents: GameEvent[];
   matchEvents: MatchEvent[];
   historyEvents: GameEvent[];
   elapsedMs: number;
@@ -426,6 +524,7 @@ export type ArenaEvent = {
   title: string;
   description: string;
   location?: { x: number; z: number };
+  radius?: number;
   regionName?: string;
   startedAt: number;
   durationMs?: number;

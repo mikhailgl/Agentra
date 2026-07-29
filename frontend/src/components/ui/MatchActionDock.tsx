@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getBetTypeLabel, getOddsForBetType, MIN_BET_AMOUNT } from "../../game/player";
+import { getBetTypeLabel, getOddsForBetType, getSponsorDropCost, MIN_BET_AMOUNT } from "../../game/player";
 import type { SponsorDropKind } from "../../game/simulation";
 import type { BetType, Bot, PlayerState } from "../../game/types";
 
@@ -14,6 +14,7 @@ export function MatchActionDock({
   onPlaceBet,
   onSponsorDrop,
   onCreateBot,
+  sponsorDropPending,
 }: {
   player: PlayerState;
   bots: Bot[];
@@ -22,6 +23,7 @@ export function MatchActionDock({
   onPlaceBet: (type: BetType, botId: string, amount: number, odds: number) => void;
   onSponsorDrop: (botId: string, kind: SponsorDropKind) => void;
   onCreateBot: () => void;
+  sponsorDropPending: boolean;
 }) {
   const aliveBots = useMemo(() => bots.filter((bot) => bot.alive), [bots]);
   const [betType, setBetType] = useState<BetType>("winner");
@@ -115,8 +117,8 @@ export function MatchActionDock({
         </select>
         <div className="sponsor-quick-grid">
           {SPONSOR_DROPS.map((drop) => (
-            <button key={drop} type="button" disabled={!sponsorBotId} onClick={() => onSponsorDrop(sponsorBotId, drop)}>
-              {drop}
+            <button key={drop} type="button" disabled={sponsorDropPending || !sponsorBotId || player.credits < getSponsorDropCost(drop)} onClick={() => onSponsorDrop(sponsorBotId, drop)}>
+              {sponsorDropPending ? "Sending..." : `${drop} ${getSponsorDropCost(drop)}`}
             </button>
           ))}
         </div>

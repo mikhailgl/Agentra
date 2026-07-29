@@ -1,10 +1,6 @@
-import {
-  FLEE_ENEMY_RANGE,
-  VISIBLE_ENEMY_RANGE,
-  WANDER_TARGET_RADIUS,
-} from "./constants";
 import { getActiveDangerZoneEscapeTarget, getBountyTargetId, isPointInActiveDangerZone, isSuddenDeathActive } from "./arenaEvents";
 import { getBiomeAt } from "./biomes";
+import { getMatchConfig } from "./matchConfig";
 import { distance, randomPointInCircle } from "./math";
 import { createRng } from "./random";
 import { areAllied, getRelationship } from "./relationships";
@@ -29,6 +25,7 @@ export type BotDecision =
   | { action: "wander"; target: Point };
 
 export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
+  const config = getMatchConfig(match);
   const escapeTarget = getActiveDangerZoneEscapeTarget(match, bot);
   if (escapeTarget) {
     bot.behavior = "fleeing";
@@ -82,7 +79,7 @@ export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
     return { action: "attack", target: enemy };
   }
 
-  if (nearestLoot && shouldSeekLoot(bot, nearestLoot)) {
+  if (nearestLoot && shouldSeekLoot(bot, nearestLoot, match)) {
     bot.behavior = "seeking_loot";
     return { action: "seek_loot", target: nearestLoot };
   }
@@ -96,8 +93,9 @@ export function decideBotAction(bot: Bot, match: MatchState): BotDecision {
   if (!bot.wanderTarget || distance(bot, bot.wanderTarget) < 10) {
     bot.wanderTarget = randomPointInCircle(
       bot,
-      WANDER_TARGET_RADIUS,
+      config.ai.wanderTargetRadius,
       createRng(hashSeed(`${match.id}:${bot.id}:${Math.floor(match.elapsedMs / 3500)}`)),
+      config,
     );
   }
 
@@ -111,16 +109,17 @@ function findNearestEnemy(bot: Bot, match: MatchState): Bot | null {
 }
 
 function findPreferredEnemy(bot: Bot, match: MatchState): Bot | null {
+  const config = getMatchConfig(match);
   const enemies = match.bots.filter((candidate) => candidate.alive && candidate.id !== bot.id && !areAllied(bot, candidate, match.elapsedMs));
   const bountyTargetId = getBountyTargetId(match);
-  const bountyTarget = bountyTargetId ? enemies.find((candidate) => candidate.id === bountyTargetId && distance(bot, candidate) <= VISIBLE_ENEMY_RANGE * 1.25) : null;
+  const bountyTarget = bountyTargetId ? enemies.find((candidate) => candidate.id === bountyTargetId && distance(bot, candidate) <= config.ai.visibleEnemyRange * 1.25) : null;
   if (bountyTarget) {
     return bountyTarget;
   }
 
   if (bot.personality === "Hunter") {
     return enemies
-      .filter((candidate) => distance(bot, candidate) <= VISIBLE_ENEMY_RANGE * 1.15)
+      .filter((candidate) => distance(bot, candidate) <= config.ai.visibleEnemyRange * 1.15)
       .sort((a, b) => a.health - b.health || distance(bot, a) - distance(bot, b))[0] ?? null;
   }
 
@@ -132,6 +131,7 @@ function findPreferredEnemy(bot: Bot, match: MatchState): Bot | null {
 }
 
 function findInfluencedEnemy(bot: Bot, match: MatchState): Bot | null {
+  const config = getMatchConfig(match);
   const revengeInfluence = bot.activeInfluences
     ?.filter((influence) => influence.type === "revenge" && influence.expiresAtMs > match.elapsedMs && influence.targetBotId)
     .sort((a, b) => b.strength - a.strength)[0];
@@ -147,7 +147,7 @@ function findInfluencedEnemy(bot: Bot, match: MatchState): Bot | null {
       !areAllied(bot, candidate, match.elapsedMs),
   );
 
-  if (!target || distance(bot, target) > VISIBLE_ENEMY_RANGE * (1.1 + revengeInfluence.strength)) {
+  if (!target || distance(bot, target) > config.ai.visibleEnemyRange * (1.1 + revengeInfluence.strength)) {
     return null;
   }
 
@@ -167,6 +167,7 @@ function findNearestCreature(bot: Bot, match: MatchState): Creature | null {
 }
 
 function shouldFlee(bot: Bot, enemy: Bot, livingCount: number, match: MatchState): boolean {
+  const config = getMatchConfig(match);
   const enemyDistance = distance(bot, enemy);
   const relationship = getRelationship(bot, enemy.id);
   const instruction = bot.tacticalInstruction?.toLowerCase() ?? "";
@@ -181,24 +182,25 @@ function shouldFlee(bot: Bot, enemy: Bot, livingCount: number, match: MatchState
   }
 
   if (bot.personality === "Berserker") {
-    return bot.health < 18 + defensePressure * 12 && enemyDistance <= FLEE_ENEMY_RANGE * (0.75 + relationship.fear * 0.4) * fleeBias;
+    return bot.health < 18 + defensePressure * 12 && enemyDistance <= config.ai.fleeEnemyRange * (0.75 + relationship.fear * 0.4) * fleeBias;
   }
 
   if (bot.personality === "Coward") {
-    return (bot.health < 62 + defensePressure * 10 && enemyDistance <= FLEE_ENEMY_RANGE * 1.6 * fleeBias) || enemyDistance <= 92 * fleeBias;
+    return (bot.health < 62 + defensePressure * 10 && enemyDistance <= config.ai.fleeEnemyRange * 1.6 * fleeBias) || enemyDistance <= 92 * fleeBias;
   }
 
   if (bot.personality === "Survivor" && livingCount > 4) {
-    return enemyDistance <= FLEE_ENEMY_RANGE * 1.35 * fleeBias || (bot.health < 55 + defensePressure * 10 && enemyDistance <= FLEE_ENEMY_RANGE * 1.8 * fleeBias);
+    return enemyDistance <= config.ai.fleeEnemyRange * 1.35 * fleeBias || (bot.health < 55 + defensePressure * 10 && enemyDistance <= config.ai.fleeEnemyRange * 1.8 * fleeBias);
   }
 
   return (
     bot.health < 30 + bot.psychology.selfPreservation * 20 + defensePressure * 12 &&
-    enemyDistance <= FLEE_ENEMY_RANGE * (1 + relationship.fear * 0.7 + getTraitModifier(bot, "fleeBonus")) * fleeBias
+    enemyDistance <= config.ai.fleeEnemyRange * (1 + relationship.fear * 0.7 + getTraitModifier(bot, "fleeBonus")) * fleeBias
   );
 }
 
 function findInstructionTarget(bot: Bot, match: MatchState): Bot | null {
+  const config = getMatchConfig(match);
   const instruction = bot.tacticalInstruction?.toLowerCase() ?? "";
   if (!instruction) {
     return null;
@@ -211,7 +213,7 @@ function findInstructionTarget(bot: Bot, match: MatchState): Bot | null {
 
   if (instruction.includes("weakened") || instruction.includes("finish") || instruction.includes("hunt")) {
     return enemies
-      .filter((candidate) => distance(bot, candidate) <= VISIBLE_ENEMY_RANGE * 1.2)
+      .filter((candidate) => distance(bot, candidate) <= config.ai.visibleEnemyRange * 1.2)
       .sort((a, b) => a.health - b.health || distance(bot, a) - distance(bot, b))[0] ?? null;
   }
 
@@ -223,7 +225,8 @@ function findInstructionTarget(bot: Bot, match: MatchState): Bot | null {
   return null;
 }
 
-function shouldSeekLoot(bot: Bot, loot: LootItem): boolean {
+function shouldSeekLoot(bot: Bot, loot: LootItem, match?: MatchState): boolean {
+  const config = getMatchConfig(match);
   const instruction = bot.tacticalInstruction?.toLowerCase() ?? "";
   if (instruction.includes("loot") || instruction.includes("scavenge") || instruction.includes("credits")) {
     return true;
@@ -249,10 +252,11 @@ function shouldSeekLoot(bot: Bot, loot: LootItem): boolean {
     return false;
   }
 
-  return distance(bot, loot) <= VISIBLE_ENEMY_RANGE * (0.8 + getTraitModifier(bot, "lootBonus"));
+  return distance(bot, loot) <= config.ai.visibleEnemyRange * (0.8 + getTraitModifier(bot, "lootBonus"));
 }
 
 function getChaseRange(bot: Bot, livingCount: number, match: MatchState): number {
+  const config = getMatchConfig(match);
   const attackBias =
     1 +
     getInfluenceStrength(bot, "aggression") * 0.5 +
@@ -261,12 +265,12 @@ function getChaseRange(bot: Bot, livingCount: number, match: MatchState): number
     (isSuddenDeathActive(match) ? 0.28 : 0);
   const biome = getBiomeAt(bot, match.zones);
   const visibility = 1 + (biome.modifiers.visibility ?? 0) + ((bot.affinities.biomes[biome.id] ?? 1) - 1) * 0.12;
-  if (livingCount <= 2 && bot.inventory.weapon) return VISIBLE_ENEMY_RANGE * 0.95 * attackBias * visibility;
-  if (bot.personality === "Berserker") return VISIBLE_ENEMY_RANGE * 1.35 * attackBias * visibility;
-  if (bot.personality === "Hunter") return VISIBLE_ENEMY_RANGE * 1.2 * attackBias * visibility;
-  if (bot.personality === "Coward") return VISIBLE_ENEMY_RANGE * 0.45 * attackBias * visibility;
-  if (bot.personality === "Survivor") return (livingCount <= 4 ? VISIBLE_ENEMY_RANGE : VISIBLE_ENEMY_RANGE * 0.35) * attackBias * visibility;
-  return VISIBLE_ENEMY_RANGE * attackBias * visibility;
+  if (livingCount <= 2 && bot.inventory.weapon) return config.ai.visibleEnemyRange * 0.95 * attackBias * visibility;
+  if (bot.personality === "Berserker") return config.ai.visibleEnemyRange * 1.35 * attackBias * visibility;
+  if (bot.personality === "Hunter") return config.ai.visibleEnemyRange * 1.2 * attackBias * visibility;
+  if (bot.personality === "Coward") return config.ai.visibleEnemyRange * 0.45 * attackBias * visibility;
+  if (bot.personality === "Survivor") return (livingCount <= 4 ? config.ai.visibleEnemyRange : config.ai.visibleEnemyRange * 0.35) * attackBias * visibility;
+  return config.ai.visibleEnemyRange * attackBias * visibility;
 }
 
 function shouldForceEndgamePressure(bot: Bot, livingCount: number, match: MatchState): boolean {

@@ -1,41 +1,43 @@
-import { BOT_COUNT, PERSISTENT_BOT_COUNT } from "./constants";
+import { DEFAULT_MATCH_CONFIG, getQueueTargetSize, resolveMatchConfig, type MatchConfigInput } from "./matchConfig";
 import { createRng, shuffle } from "./random";
 import { saveRemoteGameState } from "./remotePersistence";
 import type { PersistentBot } from "./types";
 
 const ARENA_QUEUE_KEY = "ai-battle:arena-queue:v1";
-const QUEUE_TARGET_SIZE = Math.max(BOT_COUNT * 2, PERSISTENT_BOT_COUNT);
 
-export function loadArenaQueue(pool: PersistentBot[], activeBotIds: string[] = []): PersistentBot[] {
+export function loadArenaQueue(pool: PersistentBot[], activeBotIds: string[] = [], configInput?: MatchConfigInput): PersistentBot[] {
   const active = new Set(activeBotIds);
-  const queueIds = normalizeQueueIds(readQueueIds(), pool, active);
+  const config = resolveMatchConfig(configInput);
+  const queueIds = normalizeQueueIds(readQueueIds(), pool, active, config);
   saveQueueIds(queueIds);
   return queueIds.map((id) => pool.find((bot) => bot.id === id)).filter((bot): bot is PersistentBot => Boolean(bot));
 }
 
-export function enqueueBotForArena(botId: string, pool: PersistentBot[], activeBotIds: string[] = []): PersistentBot[] {
+export function enqueueBotForArena(botId: string, pool: PersistentBot[], activeBotIds: string[] = [], configInput?: MatchConfigInput): PersistentBot[] {
+  const config = resolveMatchConfig(configInput);
   const bot = pool.find((candidate) => candidate.id === botId && candidate.custom);
   if (!bot) {
-    return loadArenaQueue(pool, activeBotIds);
+    return loadArenaQueue(pool, activeBotIds, config);
   }
 
   const active = new Set(activeBotIds);
-  const existing = normalizeQueueIds(readQueueIds(), pool, active).filter((id) => id !== botId);
-  const nextIds = normalizeQueueIds([botId, ...existing], pool, active);
+  const existing = normalizeQueueIds(readQueueIds(), pool, active, config).filter((id) => id !== botId);
+  const nextIds = normalizeQueueIds([botId, ...existing], pool, active, config);
   saveQueueIds(nextIds);
   return nextIds.map((id) => pool.find((candidate) => candidate.id === id)).filter((candidate): candidate is PersistentBot => Boolean(candidate));
 }
 
-export function takeQueuedEntrants(pool: PersistentBot[], carryOverBotId?: string): { entrants: PersistentBot[]; queue: PersistentBot[] } {
+export function takeQueuedEntrants(pool: PersistentBot[], carryOverBotId?: string, configInput?: MatchConfigInput): { entrants: PersistentBot[]; queue: PersistentBot[] } {
+  const config = resolveMatchConfig(configInput);
   const carryOverBot = carryOverBotId ? pool.find((bot) => bot.id === carryOverBotId) : undefined;
   const selectedIds = new Set<string>(carryOverBot ? [carryOverBot.id] : []);
   const entrants: PersistentBot[] = carryOverBot ? [carryOverBot] : [];
-  let queueIds = normalizeQueueIds(readQueueIds(), pool, selectedIds);
-  const needed = Math.max(0, BOT_COUNT - entrants.length);
+  let queueIds = normalizeQueueIds(readQueueIds(), pool, selectedIds, config);
+  const needed = Math.max(0, config.roster.matchBotCount - entrants.length);
 
-  while (entrants.length < BOT_COUNT) {
+  while (entrants.length < config.roster.matchBotCount) {
     if (queueIds.length === 0) {
-      queueIds = normalizeQueueIds([], pool, selectedIds);
+      queueIds = normalizeQueueIds([], pool, selectedIds, config);
     }
 
     const nextId = queueIds.shift();
@@ -56,17 +58,18 @@ export function takeQueuedEntrants(pool: PersistentBot[], carryOverBotId?: strin
     }
   }
 
-  const nextQueueIds = normalizeQueueIds(queueIds, pool, selectedIds);
+  const nextQueueIds = normalizeQueueIds(queueIds, pool, selectedIds, config);
   saveQueueIds(nextQueueIds);
   return {
-    entrants: entrants.slice(0, BOT_COUNT),
+    entrants: entrants.slice(0, config.roster.matchBotCount),
     queue: nextQueueIds.map((id) => pool.find((bot) => bot.id === id)).filter((bot): bot is PersistentBot => Boolean(bot)),
   };
 }
 
-function normalizeQueueIds(rawIds: string[], pool: PersistentBot[], excludedIds: Set<string>): string[] {
+function normalizeQueueIds(rawIds: string[], pool: PersistentBot[], excludedIds: Set<string>, config = DEFAULT_MATCH_CONFIG): string[] {
   const validIds = new Set(pool.map((bot) => bot.id));
   const seen = new Set<string>();
+  const queueTargetSize = getQueueTargetSize(config);
   const customQueued = rawIds.filter((id) => {
     const bot = pool.find((candidate) => candidate.id === id);
     if (!bot?.custom || excludedIds.has(id) || seen.has(id)) {
@@ -85,7 +88,7 @@ function normalizeQueueIds(rawIds: string[], pool: PersistentBot[], excludedIds:
   });
 
   const next = [...customQueued, ...baseQueued];
-  while (next.length < QUEUE_TARGET_SIZE) {
+  while (next.length < queueTargetSize) {
     const filler = createBaseCycle(pool, excludedIds, new Set(next), next.length);
     if (filler.length === 0) {
       break;
@@ -93,7 +96,7 @@ function normalizeQueueIds(rawIds: string[], pool: PersistentBot[], excludedIds:
     next.push(...filler);
   }
 
-  return next.slice(0, QUEUE_TARGET_SIZE);
+  return next.slice(0, queueTargetSize);
 }
 
 function createBaseCycle(pool: PersistentBot[], excludedIds: Set<string>, alreadyQueued: Set<string>, salt: number): string[] {

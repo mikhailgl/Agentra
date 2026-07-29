@@ -70,6 +70,7 @@ export type ArenaZoneView = {
 };
 
 export type ArenaViewModel = {
+  worldSize: number;
   bots: ArenaBotView[];
   loot: ArenaLootView[];
   creatures: ArenaCreatureView[];
