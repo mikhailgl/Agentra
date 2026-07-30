@@ -34,8 +34,15 @@ test("legacy checkpoints still restore without a persistent roster", () => {
 
 test("finalizing a match persists progression and produces a match log", async () => {
   let loggedMatchNumber: number | null = null;
-  const service = new ArenaService({ onMatchLogReady: (log) => { loggedMatchNumber = log.matchNumber; } });
+  let loggedEventCount = 0;
+  const service = new ArenaService({
+    onMatchLogReady: (log) => {
+      loggedMatchNumber = log.matchNumber;
+      loggedEventCount = log.events.length;
+    },
+  });
   const checkpoint = service.getCheckpoint();
+  checkpoint.match.logEvents.push({ id: 99_999, timeMs: 1_000, message: "Persist this event", kind: "system" });
   checkpoint.match.ended = true;
   checkpoint.match.finalized = false;
   checkpoint.match.winnerId = checkpoint.match.bots[0].id;
@@ -51,6 +58,11 @@ test("finalizing a match persists progression and produces a match log", async (
   const finalized = service.getCheckpoint();
   const winner = finalized.persistentBots?.find((bot) => bot.id === checkpoint.match.winnerId);
   assert.equal(loggedMatchNumber, checkpoint.matchNumber);
+  assert.ok(loggedEventCount > 0);
+  assert.deepEqual(finalized.match.logEvents, []);
+  assert.deepEqual(finalized.match.historyEvents, []);
+  assert.deepEqual(finalized.match.learningEvents, []);
+  assert.deepEqual(finalized.match.eventDebounce, {});
   assert.equal(winner?.career.matchesPlayed, 1);
   assert.equal(winner?.career.wins, 1);
   assert.equal(winner?.journal?.[0].matchNumber, checkpoint.matchNumber);

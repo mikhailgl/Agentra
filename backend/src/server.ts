@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { ArenaCheckpointRepository } from "./arenaCheckpointRepository.js";
-import { ArenaService } from "./arenaService.js";
+import { ArenaService, type ArenaCheckpoint } from "./arenaService.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
 import { MatchLogRepository } from "./matchLogRepository.js";
@@ -10,7 +10,8 @@ import type { SponsorDropKind } from "../../frontend/src/game/simulation.js";
 import type { MatchLog } from "../../frontend/src/game/types.js";
 
 const ARENA_INITIALIZATION_TIMEOUT_MS = 10_000;
-const ARENA_INITIALIZATION_RETRY_MS = 30_000;
+const ARENA_LATE_RESTORE_TIMEOUT_MS = 50_000;
+const ARENA_CHECKPOINT_INTERVAL_MS = 5 * 60_000;
 const SPONSOR_DROP_KINDS: ReadonlySet<SponsorDropKind> = new Set(["Knife", "Spear", "Bow", "Axe", "Medkit"]);
 
 const config = getConfig();
@@ -22,30 +23,60 @@ const matchLogRepository = new MatchLogRepository(supabase);
 const arena = new ArenaService({ onCheckpointNeeded: saveArenaCheckpoint, onMatchLogReady: saveMatchLog });
 let arenaReady = false;
 let arenaInitializationInFlight = false;
+let checkpointPersistenceReady = false;
+let arenaRecoveryWarning: string | null = null;
 
-let checkpointSave = Promise.resolve();
+let checkpointSaveInFlight = false;
+let pendingCheckpoint: { checkpoint: ArenaCheckpoint; reason: string } | null = null;
+
 function saveArenaCheckpoint(reason: string): void {
-  if (!arenaReady) {
+  if (!arenaReady || !checkpointPersistenceReady) {
     return;
   }
-  const checkpoint = arena.getCheckpoint();
-  checkpointSave = checkpointSave
-    .catch(() => undefined)
-    .then(() => arenaCheckpointRepository.save(checkpoint))
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Failed to save canonical arena checkpoint after ${reason}: ${message}`);
-    });
+
+  // Keep only the newest state while a slow write is in flight. The previous
+  // promise chain retained every large checkpoint and could grow without bound.
+  pendingCheckpoint = { checkpoint: arena.getCheckpoint(), reason };
+  void flushArenaCheckpoint();
+}
+
+async function flushArenaCheckpoint(): Promise<void> {
+  if (checkpointSaveInFlight) {
+    return;
+  }
+
+  checkpointSaveInFlight = true;
+  try {
+    while (pendingCheckpoint) {
+      const nextCheckpoint = pendingCheckpoint;
+      pendingCheckpoint = null;
+      try {
+        await arenaCheckpointRepository.save(nextCheckpoint.checkpoint);
+        arenaRecoveryWarning = null;
+      } catch (error) {
+        const message = getErrorMessage(error);
+        arenaRecoveryWarning = message;
+        console.error(`Failed to save canonical arena checkpoint after ${nextCheckpoint.reason}: ${message}`);
+      }
+    }
+  } finally {
+    checkpointSaveInFlight = false;
+    if (pendingCheckpoint) {
+      void flushArenaCheckpoint();
+    }
+  }
 }
 
 function saveMatchLog(log: MatchLog): void {
   void matchLogRepository.saveCanonical(log).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     console.error(`Failed to save match log for match ${log.matchNumber}: ${message}`);
   });
 }
 
-const checkpointTimer = setInterval(() => saveArenaCheckpoint("periodic checkpoint"), 15_000);
+// Match boundaries and player actions already request checkpoints. This slower
+// safety checkpoint limits repeated rewrites of the growing in-match JSONB state.
+const checkpointTimer = setInterval(() => saveArenaCheckpoint("periodic safety checkpoint"), ARENA_CHECKPOINT_INTERVAL_MS);
 checkpointTimer.unref();
 
 app.use(express.json({ limit: "2mb" }));
@@ -76,7 +107,12 @@ function getHostname(origin: string | undefined): string {
 }
 
 app.get("/health", (_request, response) => {
-  response.json({ ok: true, ready: arenaReady });
+  response.json({
+    ok: true,
+    ready: arenaReady,
+    checkpointPersistenceReady,
+    ...(arenaRecoveryWarning ? { warning: arenaRecoveryWarning } : {}),
+  });
 });
 
 app.get("/api/state", async (request, response, next) => {
@@ -219,28 +255,103 @@ async function initializeArena(): Promise<void> {
   }
 
   arenaInitializationInFlight = true;
+  const checkpointLoad = arenaCheckpointRepository.load();
   try {
     const restoredArena = await withTimeout(
-      arenaCheckpointRepository.load(),
+      checkpointLoad,
       ARENA_INITIALIZATION_TIMEOUT_MS,
       "Timed out while loading the canonical arena checkpoint",
     );
-    if (restoredArena) {
-      arena.restore(restoredArena);
-      console.log(`Restored canonical arena checkpoint at match ${restoredArena.matchNumber}`);
-    }
+    finishArenaInitialization(restoredArena);
+  } catch (error) {
+    const message = getErrorMessage(error);
+    arenaRecoveryWarning = message;
     arena.start();
     arenaReady = true;
-    saveArenaCheckpoint(restoredArena ? "restore" : "startup");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Arena initialization failed; retrying in ${ARENA_INITIALIZATION_RETRY_MS / 1000}s: ${message}`);
-    const retryTimer = setTimeout(() => void initializeArena(), ARENA_INITIALIZATION_RETRY_MS);
-    retryTimer.unref();
+
+    if (error instanceof TimeoutError) {
+      console.error(`Arena checkpoint restore is slow; serving a temporary arena while recovery continues: ${message}`);
+    } else {
+      console.error(`Arena checkpoint restore failed; serving a temporary arena while recovery retries: ${message}`);
+    }
+    void finishLateArenaRestore(checkpointLoad);
   } finally {
     arenaInitializationInFlight = false;
   }
 }
+
+function finishArenaInitialization(restoredArena: ArenaCheckpoint | null): void {
+  if (restoredArena) {
+    arena.restore(restoredArena);
+    console.log(`Restored canonical arena checkpoint at match ${restoredArena.matchNumber}`);
+  }
+  arena.start();
+  arenaReady = true;
+  checkpointPersistenceReady = true;
+  arenaRecoveryWarning = null;
+  saveArenaCheckpoint(restoredArena ? "restore" : "startup");
+}
+
+async function finishLateArenaRestore(checkpointLoad: Promise<ArenaCheckpoint | null>): Promise<void> {
+  const recoveryDeadline = Date.now() + ARENA_LATE_RESTORE_TIMEOUT_MS;
+  let nextLoad = checkpointLoad;
+  try {
+    while (Date.now() < recoveryDeadline) {
+      try {
+        const restoredArena = await withTimeout(
+          nextLoad,
+          recoveryDeadline - Date.now(),
+          "Timed out waiting for the late canonical arena checkpoint restore",
+        );
+        if (restoredArena) {
+          arena.restore(restoredArena);
+          console.log(`Late-restored canonical arena checkpoint at match ${restoredArena.matchNumber}`);
+        }
+        arenaRecoveryWarning = null;
+        return;
+      } catch (error) {
+        const message = getErrorMessage(error);
+        arenaRecoveryWarning = message;
+        if (Date.now() >= recoveryDeadline) {
+          throw error;
+        }
+        await delay(Math.min(5_000, recoveryDeadline - Date.now()));
+        nextLoad = arenaCheckpointRepository.load();
+      }
+    }
+    throw new TimeoutError("Timed out waiting for the canonical arena checkpoint recovery");
+  } catch (error) {
+    const message = getErrorMessage(error);
+    arenaRecoveryWarning = message;
+    console.error(`Arena checkpoint recovery was abandoned; continuing with the fresh arena: ${message}`);
+  } finally {
+    checkpointPersistenceReady = true;
+    saveArenaCheckpoint("checkpoint recovery completed");
+  }
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, durationMs);
+    timer.unref();
+  });
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+class TimeoutError extends Error {}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -248,7 +359,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
     return await Promise.race([
       promise,
       new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        timer = setTimeout(() => reject(new TimeoutError(message)), timeoutMs);
         timer.unref();
       }),
     ]);

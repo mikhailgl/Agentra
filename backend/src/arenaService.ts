@@ -112,7 +112,7 @@ export class ArenaService {
     return {
       version: 2,
       matchNumber: this.matchNumber,
-      match: cloneJson(this.match),
+      match: this.match.finalized ? createPublicMatchSnapshot(this.match, { thoughtLimit: 0 }) : cloneJson(this.match),
       arenaState: cloneJson(this.arenaState),
       persistentBots: cloneJson(this.persistentBots),
       arenaQueueIds: [...this.arenaQueueIds],
@@ -151,7 +151,6 @@ export class ArenaService {
     this.match = this.createMatch(this.arenaState.lastWinnerId);
     this.arenaState = this.createRunningArenaState(this.match);
     this.lastTickAt = Date.now();
-    this.requestCheckpoint("next match");
     return this.getSnapshot();
   }
 
@@ -228,8 +227,10 @@ export class ArenaService {
       ...this.basicResults.filter((result) => result.matchNumber !== this.matchNumber),
     ].slice(0, MAX_BASIC_RESULTS);
 
-    this.options.onMatchLogReady?.(createMatchLog(this.matchNumber, this.match, endedAt));
+    const matchLog = createMatchLog(this.matchNumber, this.match, endedAt);
+    this.options.onMatchLogReady?.(matchLog);
     this.applyPersistentProgression();
+    this.compactCompletedMatch();
 
     this.arenaState = {
       ...this.arenaState,
@@ -239,6 +240,16 @@ export class ArenaService {
       intermissionEndsAt: Date.now() + INTERMISSION_MS,
     };
     this.requestCheckpoint("match finalized");
+  }
+
+  private compactCompletedMatch(): void {
+    // The complete timeline has moved to match_logs. Keeping it in the arena
+    // checkpoint as well duplicates the largest part of every completed match
+    // and forces Postgres to rewrite it during later checkpoint updates.
+    this.match.logEvents = [];
+    this.match.historyEvents = [];
+    this.match.learningEvents = [];
+    this.match.eventDebounce = {};
   }
 
   private requestCheckpoint(reason: string): void {
