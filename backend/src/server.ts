@@ -5,6 +5,7 @@ import { ArenaCheckpointRepository } from "./arenaCheckpointRepository.js";
 import { ArenaService, type ArenaCheckpoint } from "./arenaService.js";
 import { CreatorApiRepository } from "./creatorApiRepository.js";
 import { CreatorApiService } from "./creatorApiService.js";
+import { CommunityRepository } from "./communityRepository.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
 import { GeneratedMediaRepository } from "./generatedMediaRepository.js";
@@ -31,6 +32,7 @@ const matchLogRepository = new MatchLogRepository(supabase);
 const generatedMediaRepository = new GeneratedMediaRepository(supabase);
 const playerService = new PlayerService(new PlayerAccountRepository(supabase));
 const creatorApiService = new CreatorApiService(new CreatorApiRepository(supabase));
+const communityRepository = new CommunityRepository(supabase);
 const arena = new ArenaService({
   onCheckpointNeeded: saveArenaCheckpoint,
   onMatchLogReady: saveMatchLog,
@@ -212,6 +214,56 @@ app.get("/api/agent/v1/spec", (_request, response) => {
 app.get("/api/agent/v1/strategies", async (request, response, next) => {
   try {
     response.json({ strategies: await creatorApiService.listStrategies(Number(request.query.limit ?? 50)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/fighters/:botId/profile", requireArenaReady, async (request, response, next) => {
+  try {
+    const snapshot = arena.getSnapshot({ includeRoster: true });
+    const bot = snapshot.persistentBots?.find((candidate) => candidate.id === request.params.botId);
+    if (!bot) {
+      response.status(404).json({ error: "Fighter profile not found" });
+      return;
+    }
+    const [fanCount, logs] = await Promise.all([
+      communityRepository.countFighterFans(bot.id),
+      matchLogRepository.listForBot(bot.id, 8),
+    ]);
+    response.json({
+      profile: {
+        bot,
+        standing: snapshot.leagueState.standings.find((standing) => standing.botId === bot.id),
+        fanCount,
+        recentStories: logs.map((log) => {
+          const result = log.botResults.find((candidate) => candidate.botId === bot.id);
+          const placement = [...log.botResults]
+            .sort((a, b) => b.survivalTimeMs - a.survivalTimeMs || b.kills - a.kills || b.damageDealt - a.damageDealt)
+            .findIndex((candidate) => candidate.botId === bot.id) + 1;
+          return {
+            matchNumber: log.matchNumber,
+            eventName: log.competition?.eventName ?? `Match ${log.matchNumber}`,
+            placement,
+            kills: result?.kills ?? 0,
+            damageDealt: result?.damageDealt ?? 0,
+            won: log.winnerBotId === bot.id,
+            endedAt: log.endedAt,
+          };
+        }),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/player/favorites/:botId", requireArenaReady, async (request, response, next) => {
+  try {
+    if (typeof request.body?.favorite !== "boolean") throw new PlayerActionError("favorite must be true or false");
+    const roster = arena.getSnapshot({ includeRoster: true }).persistentBots ?? [];
+    const state = await playerService.setFavoriteBot(getSessionToken(request), request.params.botId, request.body.favorite, new Set(roster.map((bot) => bot.id)));
+    response.json({ state, fanCount: await communityRepository.countFighterFans(request.params.botId) });
   } catch (error) {
     next(error);
   }

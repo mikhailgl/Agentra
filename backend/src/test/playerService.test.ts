@@ -196,6 +196,19 @@ test("fantasy rosters score each match once and reset with a new season", async 
   assert.equal(reset.fantasy.history.length, 1);
 });
 
+test("fan club membership is server-authoritative and idempotent", async () => {
+  const service = new PlayerService(new MemoryPlayerStore());
+  const opened = await service.openSession();
+  const validBots = new Set(["bot-ada", "bot-grace"]);
+  const joined = await service.setFavoriteBot(opened.sessionToken, "bot-ada", true, validBots);
+  assert.deepEqual(joined.favoriteBotIds, ["bot-ada"]);
+  const joinedAgain = await service.setFavoriteBot(opened.sessionToken, "bot-ada", true, validBots);
+  assert.deepEqual(joinedAgain.favoriteBotIds, ["bot-ada"]);
+  const left = await service.setFavoriteBot(opened.sessionToken, "bot-ada", false, validBots);
+  assert.deepEqual(left.favoriteBotIds, []);
+  await assert.rejects(() => service.setFavoriteBot(opened.sessionToken, "unknown", true, validBots), /Fighter not found/);
+});
+
 function clone<T>(value: T): T {
   return value === null ? value : JSON.parse(JSON.stringify(value)) as T;
 }

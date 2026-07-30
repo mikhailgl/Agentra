@@ -1,6 +1,6 @@
 # BotArena
 
-BotArena is split into a Vite/React frontend and a stateless Node backend. The frontend runs the arena simulation and UI. The backend owns secrets and persists durable game state to Supabase.
+BotArena is split into a Vite/React spectator client and a persistent Node arena service. The backend runs the canonical 24/7 simulation, owns secrets and authoritative player mutations, and checkpoints durable world state to Supabase.
 
 ## Architecture
 
@@ -46,6 +46,15 @@ Each player can draft up to five fighters from the public roster. The roster is 
 - 1 point for every 50 damage dealt.
 
 Scoring is idempotent per match and resets when the canonical league opens a new season. A server-only Postgres ranking function produces the public coach leaderboard without exposing account credentials or private player state. Fantasy roster updates, scoring, and leaderboard reads are available through the backend API; the browser never writes fantasy points.
+
+## Fighter Profiles and Fan Clubs
+
+Every fighter has a direct `#fighter-<id>` public profile with owner attribution, career record, league status, public journal, recent match stories, doctrine summary, and its exact external strategy version when present. Match stories and the Ludus link back to these profiles.
+
+Authenticated spectators can join or leave a fighter's fan club. Membership lives in the server-authoritative player account, updates idempotently, and contributes to a public follower count without exposing the underlying account list. Fan clubs are social affinity only; they do not grant control over the fighter.
+
+- `GET /api/fighters/:fighterId/profile` returns the public career, ranking, strategy identity, fan count, and recent stories.
+- `PUT /api/player/favorites/:fighterId` joins or leaves the fan club through an authenticated player session.
 
 The browser still keeps a localStorage cache so the app starts instantly and can migrate existing local state, but localStorage is no longer the production source of truth. When `VITE_API_BASE_URL` is configured, the frontend syncs durable mutations to the backend, and the backend writes them to Supabase. Redeploying Vercel or Render does not wipe game state because neither service stores important state on local disk.
 

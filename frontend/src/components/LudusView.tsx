@@ -32,6 +32,7 @@ export function LudusView({
   onCreateBot,
   onEnterBot,
   onUpdateDoctrine,
+  onOpenFighter,
   onUpdateAccountName,
   onRecoverAccount,
   onRotateRecoveryCode,
@@ -52,6 +53,7 @@ export function LudusView({
   onCreateBot: (build: CustomBotBuild, enterContest: boolean) => Promise<boolean>;
   onEnterBot: (botId: string) => void;
   onUpdateDoctrine: (botId: string, instruction: string) => void;
+  onOpenFighter: (botId: string) => void;
   onUpdateAccountName: (name: string) => Promise<boolean>;
   onRecoverAccount: (recoveryCode: string) => Promise<boolean>;
   onRotateRecoveryCode: () => Promise<string | null>;
@@ -143,6 +145,7 @@ export function LudusView({
               isActive={activeBotIds.includes(selectedBot.id)}
               canAfford={player.credits >= BOT_CONTEST_ENTRY_FEE}
               onEnter={() => onEnterBot(selectedBot.id)}
+              onOpenProfile={() => onOpenFighter(selectedBot.id)}
               pending={mutationPending}
             />
             <nav className="ludus-tabs" aria-label="Bot profile sections">
@@ -358,6 +361,7 @@ function BotProfileHeader({
   canAfford,
   pending,
   onEnter,
+  onOpenProfile,
 }: {
   bot: PersistentBot;
   isOwned: boolean;
@@ -367,6 +371,7 @@ function BotProfileHeader({
   canAfford: boolean;
   pending: boolean;
   onEnter: () => void;
+  onOpenProfile: () => void;
 }) {
   return (
     <header className="bot-profile-hero">
@@ -378,14 +383,17 @@ function BotProfileHeader({
         <h2>{bot.name}</h2>
         <p>{bot.doctrineSummary ?? "Autonomous instincts"}</p>
       </div>
-      <button
-        type="button"
-        disabled={pending || !canEnter || !canAfford}
-        title={isActive ? "Already fighting" : isQueued ? "Already queued" : canAfford ? "" : `Need ${BOT_CONTEST_ENTRY_FEE} credits`}
-        onClick={onEnter}
-      >
-        {pending ? "Saving..." : isActive ? "In Arena" : isQueued ? "Queued" : `Enter (${BOT_CONTEST_ENTRY_FEE})`}
-      </button>
+      <div className="bot-profile-actions">
+        <button type="button" className="secondary-button" onClick={onOpenProfile}>Public profile</button>
+        {isOwned && <button
+          type="button"
+          disabled={pending || !canEnter || !canAfford}
+          title={isActive ? "Already fighting" : isQueued ? "Already queued" : canAfford ? "" : `Need ${BOT_CONTEST_ENTRY_FEE} credits`}
+          onClick={onEnter}
+        >
+          {pending ? "Saving..." : isActive ? "In Arena" : isQueued ? "Queued" : `Enter (${BOT_CONTEST_ENTRY_FEE})`}
+        </button>}
+      </div>
     </header>
   );
 }

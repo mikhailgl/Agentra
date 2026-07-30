@@ -50,6 +50,18 @@ export class MatchLogRepository {
     if (response.error) throw response.error;
     return isMatchLog(response.data?.log) ? response.data.log : null;
   }
+
+  async listForBot(botId: string, limit = 8): Promise<MatchLog[]> {
+    const response = await this.supabase
+      .from("match_logs")
+      .select("log")
+      .eq("client_id", CANONICAL_ARENA_ID)
+      .contains("log", { entrants: [{ botId }] })
+      .order("match_number", { ascending: false })
+      .limit(normalizeLimit(limit));
+    if (response.error) throw response.error;
+    return response.data?.map((row) => row.log).filter(isMatchLog) ?? [];
+  }
 }
 
 function normalizeLimit(limit: number): number {

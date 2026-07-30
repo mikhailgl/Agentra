@@ -150,6 +150,16 @@ export class PlayerService {
     }));
   }
 
+  async setFavoriteBot(rawToken: string | undefined, botId: string, favorite: boolean, validBotIds: Set<string>): Promise<PlayerState> {
+    if (!validBotIds.has(botId)) throw new PlayerActionError("Fighter not found");
+    return this.mutate(rawToken, (state) => ({
+      ...state,
+      favoriteBotIds: favorite
+        ? [...new Set([...state.favoriteBotIds, botId])].slice(0, 100)
+        : state.favoriteBotIds.filter((id) => id !== botId),
+    }));
+  }
+
   async scoreFantasyMatch(match: MatchState, seasonId: string): Promise<void> {
     const botIds = match.bots.map((bot) => bot.id);
     const accounts = await this.store.listFantasyCandidates(botIds);

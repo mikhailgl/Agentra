@@ -15,6 +15,7 @@ import {
   hasArenaBackend,
   issueRemoteCreatorApiKey,
   loadArenaSnapshot,
+  setRemoteFavoriteBot,
   loadRemoteOwnedBots,
   loadRemotePlayer,
   loadRemoteGameState,
@@ -48,7 +49,7 @@ type CustomBotBuild = {
 
 const ARENA_UI_SYNC_MS = 5_000;
 const ROSTER_POLL_MS = 60_000;
-type ActiveView = "arena" | "league" | "fantasy" | "ludus" | "videos" | "story";
+type ActiveView = "arena" | "league" | "fantasy" | "ludus" | "videos" | "story" | "fighter";
 const GeneratedVideosView = lazy(() =>
   import("./components/GeneratedVideosView").then((module) => ({ default: module.GeneratedVideosView })),
 );
@@ -60,6 +61,9 @@ const FantasyView = lazy(() =>
 );
 const MatchStoryView = lazy(() =>
   import("./components/MatchStoryView").then((module) => ({ default: module.MatchStoryView })),
+);
+const FighterProfileView = lazy(() =>
+  import("./components/FighterProfileView").then((module) => ({ default: module.FighterProfileView })),
 );
 
 function App() {
@@ -391,6 +395,21 @@ function App() {
     }
   }, []);
 
+  const handleToggleFavorite = useCallback(async (botId: string, favorite: boolean): Promise<number | null> => {
+    setArenaActionError(null);
+    try {
+      const result = await setRemoteFavoriteBot(botId, favorite);
+      if (!result) throw new Error("Arena backend is not configured");
+      playerStateRef.current = result.state;
+      savePlayerState(result.state);
+      setPlayerState(result.state);
+      return result.fanCount;
+    } catch (error) {
+      setArenaActionError(getErrorMessage(error));
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (cameraMode !== "follow_bot") return;
     if (!selectedBotId) {
@@ -621,6 +640,7 @@ function App() {
         onCreateBot={handleCreateCustomBot}
         onEnterBot={handleEnterBot}
         onUpdateDoctrine={handleUpdateDoctrine}
+        onOpenFighter={(botId) => navigateToFighter(botId)}
         onUpdateAccountName={handleUpdateAccountName}
         onRecoverAccount={handleRecoverAccount}
         onRotateRecoveryCode={handleRotateRecoveryCode}
@@ -643,6 +663,23 @@ function App() {
           onOpenBots={() => navigateToView("ludus")}
           onOpenLeague={() => navigateToView("league")}
           onOpenFantasy={() => navigateToView("fantasy")}
+        />
+      </Suspense>
+    );
+  }
+
+  if (activeView === "fighter") {
+    const fighterId = getFighterId();
+    return (
+      <Suspense fallback={<main className="fighter-profile-shell"><div className="fighter-profile-status">Loading fighter...</div></main>}>
+        <FighterProfileView
+          fighterId={fighterId}
+          isFavorite={playerState.favoriteBotIds.includes(fighterId)}
+          interactionReady={playerSessionReady}
+          onToggleFavorite={handleToggleFavorite}
+          onBackToArena={() => navigateToView("arena")}
+          onOpenBots={() => navigateToView("ludus")}
+          onOpenLeague={() => navigateToView("league")}
         />
       </Suspense>
     );
@@ -792,7 +829,19 @@ function getInitialActiveView(): ActiveView {
 
   const hash = window.location.hash.replace(/^#/, "");
   if (/^story-\d+$/.test(hash)) return "story";
+  if (hash.startsWith("fighter-") && hash.length > 8) return "fighter";
   return hash === "league" || hash === "fantasy" || hash === "ludus" || hash === "videos" ? hash : "arena";
+}
+
+function getFighterId(): string {
+  if (typeof window === "undefined") return "";
+  const raw = window.location.hash.replace(/^#fighter-/, "");
+  try { return decodeURIComponent(raw); } catch { return ""; }
+}
+
+function navigateToFighter(botId: string): void {
+  if (typeof window === "undefined") return;
+  window.location.hash = `fighter-${encodeURIComponent(botId)}`;
 }
 
 function getStoryMatchNumber(): number {

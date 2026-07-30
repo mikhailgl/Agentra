@@ -1,4 +1,4 @@
-import type { ArenaState, BasicMatchResult, BetType, FantasyLeaderboardEntry, GeneratedMedia, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
+import type { ArenaState, BasicMatchResult, BetType, FantasyLeaderboardEntry, FighterPublicProfile, GeneratedMedia, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
 import type { ArenaViewModel } from "../lib/simulation/types";
 
@@ -265,6 +265,27 @@ export async function loadGeneratedMedia(limit = 24): Promise<GeneratedMedia[]> 
   if (!response.ok) throw new Error(await getArenaActionError(response));
   const body = (await response.json()) as { media?: GeneratedMedia[] };
   return Array.isArray(body.media) ? body.media : [];
+}
+
+export async function loadFighterProfile(botId: string): Promise<FighterPublicProfile | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/fighters/${encodeURIComponent(botId)}/profile`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { profile: FighterPublicProfile }).profile;
+}
+
+export async function setRemoteFavoriteBot(botId: string, favorite: boolean): Promise<{ state: PlayerState; fanCount: number } | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/favorites/${encodeURIComponent(botId)}`, {
+    method: "PUT",
+    headers: getPlayerHeaders(true),
+    body: JSON.stringify({ favorite }),
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return (await response.json()) as { state: PlayerState; fanCount: number };
 }
 
 export async function uploadGeneratedMedia(input: {

@@ -99,7 +99,7 @@ export function MatchStoryView({
           </div>
           <aside className="story-results">
             <div className="story-section-heading"><span>Final table</span><h2>Placements</h2></div>
-            {placements.slice(0, 10).map((result) => <article key={result.botId}><b>#{result.placement}</b><div><strong>{result.name}</strong><small>{result.entrant?.ownerName ? `by ${result.entrant.ownerName}` : `${result.kills} eliminations`}</small></div><span>{result.damageDealt} dmg</span></article>)}
+            {placements.slice(0, 10).map((result) => <article key={result.botId}><b>#{result.placement}</b><div><a href={`#fighter-${encodeURIComponent(result.botId)}`}><strong>{result.name}</strong></a><small>{result.entrant?.ownerName ? `by ${result.entrant.ownerName}` : `${result.kills} eliminations`}</small></div><span>{result.damageDealt} dmg</span></article>)}
           </aside>
         </section>
 

@@ -608,6 +608,21 @@ export type GeneratedMedia = {
   createdAt: number;
 };
 
+export type FighterPublicProfile = {
+  bot: PersistentBot;
+  standing?: LeagueStanding;
+  fanCount: number;
+  recentStories: Array<{
+    matchNumber: number;
+    eventName: string;
+    placement: number;
+    kills: number;
+    damageDealt: number;
+    won: boolean;
+    endedAt: number;
+  }>;
+};
+
 export type MatchState = {
   id: string;
   config?: MatchConfig;

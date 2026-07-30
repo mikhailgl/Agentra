@@ -4183,3 +4183,263 @@ button:disabled {
   .story-grid { grid-template-columns: 1fr; }
   .story-media-grid, .story-epilogue > div { grid-template-columns: 1fr; }
 }
+
+.bot-profile-actions {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.story-results a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.story-results a:hover {
+  text-decoration: underline;
+}
+
+.fighter-profile-shell {
+  background:
+    radial-gradient(circle at 85% 0%, rgba(111, 45, 42, 0.28), transparent 34rem),
+    linear-gradient(145deg, #0c1210, #14170f 50%, #101719);
+  color: #edf4ee;
+  min-height: 100vh;
+  overflow-x: hidden;
+  padding: clamp(1rem, 3vw, 2.5rem);
+}
+
+.fighter-profile-nav {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  justify-content: space-between;
+  margin: 0 auto;
+  max-width: 1320px;
+  padding-bottom: 1rem;
+}
+
+.fighter-profile-nav nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.fighter-wordmark {
+  background: transparent;
+  color: #f5d77f;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+  padding: 0;
+}
+
+.fighter-public-profile {
+  margin: 0 auto;
+  max-width: 1320px;
+}
+
+.fighter-public-hero {
+  align-items: center;
+  display: grid;
+  gap: clamp(1rem, 3vw, 2rem);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: clamp(3rem, 8vw, 7rem) 0 2rem;
+}
+
+.fighter-public-sigil {
+  align-items: center;
+  background: linear-gradient(145deg, #f2c453, #8f5e18);
+  border: 1px solid #f5d77f;
+  border-radius: 22px;
+  color: #16120a;
+  display: flex;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(3rem, 8vw, 7rem);
+  font-weight: 900;
+  height: clamp(7rem, 15vw, 12rem);
+  justify-content: center;
+  width: clamp(7rem, 15vw, 12rem);
+}
+
+.fighter-public-hero > div:nth-child(2) > span,
+.fighter-profile-heading span,
+.fighter-profile-card > span,
+.fan-club-card > span {
+  color: #d4a94a;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fighter-public-hero h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(4rem, 10vw, 9rem);
+  letter-spacing: -0.07em;
+  line-height: 0.78;
+  margin: 0.65rem 0 1rem;
+}
+
+.fighter-public-hero p {
+  color: #adbbb1;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  margin: 0;
+}
+
+.fan-club-card {
+  background: rgba(23, 31, 26, 0.9);
+  border: 1px solid rgba(242, 196, 83, 0.3);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.7rem;
+  min-width: 190px;
+  padding: 1rem;
+}
+
+.fan-club-card strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2.6rem;
+}
+
+.fighter-public-metrics {
+  background: rgba(10, 15, 12, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 14px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.fighter-public-metrics > div {
+  border-right: 1px solid rgba(255, 255, 255, 0.09);
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+}
+
+.fighter-public-metrics > div:last-child { border-right: 0; }
+
+.fighter-public-metrics span,
+.fighter-standing-list span,
+.fighter-policy-list span {
+  color: #8f9d94;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.fighter-public-metrics strong { color: #f5d77f; font-size: 1.2rem; }
+
+.fighter-profile-grid {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  padding: 1rem 0 4rem;
+}
+
+.fighter-profile-main,
+.fighter-profile-side {
+  display: grid;
+  gap: 1rem;
+}
+
+.fighter-profile-card {
+  background: rgba(15, 23, 19, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.fighter-profile-heading h2,
+.fighter-profile-card h2 {
+  margin: 0.25rem 0 0;
+}
+
+.fighter-profile-card h2 small { color: #8ea097; font-size: 0.75rem; }
+.fighter-profile-card p { color: #aab8af; line-height: 1.5; margin: 0; }
+
+.fighter-story-row {
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: inherit;
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: 3rem minmax(0, 1fr) auto;
+  padding: 0.8rem 0;
+  text-decoration: none;
+}
+
+.fighter-story-row b { color: #f2c453; }
+.fighter-story-row div { display: grid; gap: 0.2rem; }
+.fighter-story-row small,
+.fighter-story-row time { color: #85938a; font-size: 0.72rem; }
+.fighter-story-row:hover strong { text-decoration: underline; }
+
+.fighter-journal-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fighter-journal-grid article {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.85rem;
+}
+
+.fighter-journal-grid article > span { color: #d4a94a; font-size: 0.65rem; font-weight: 900; text-transform: uppercase; }
+.fighter-journal-grid article p { font-size: 0.82rem; }
+
+.fighter-standing-list,
+.fighter-policy-list {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fighter-standing-list span,
+.fighter-policy-list span {
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 7px;
+  padding: 0.55rem;
+}
+
+.fighter-profile-status {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  justify-content: center;
+  min-height: 80vh;
+}
+
+.fighter-empty-copy { color: #87958c; }
+
+@media (max-width: 850px) {
+  .fighter-public-hero { grid-template-columns: auto minmax(0, 1fr); }
+  .fan-club-card { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; }
+  .fighter-public-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fighter-public-metrics > div:nth-child(3) { border-right: 0; }
+  .fighter-public-metrics > div:nth-child(-n + 3) { border-bottom: 1px solid rgba(255, 255, 255, 0.09); }
+  .fighter-profile-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .fighter-profile-shell { height: 100svh; overflow: auto; }
+  .fighter-profile-nav { align-items: stretch; flex-direction: column; gap: 0.75rem; }
+  .fighter-profile-nav nav { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .fighter-public-hero { align-items: end; gap: 1rem; padding-top: 3rem; }
+  .fighter-public-sigil { border-radius: 14px; height: 5rem; width: 5rem; font-size: 2.6rem; }
+  .fighter-public-hero h1 { font-size: clamp(3.2rem, 20vw, 5rem); }
+  .fan-club-card { align-items: stretch; grid-template-columns: 1fr; }
+  .fighter-public-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fighter-public-metrics > div { border-bottom: 1px solid rgba(255, 255, 255, 0.09); }
+  .fighter-public-metrics > div:nth-child(2n) { border-right: 0; }
+  .fighter-journal-grid { grid-template-columns: 1fr; }
+  .fighter-story-row { grid-template-columns: 2.4rem minmax(0, 1fr); }
+  .fighter-story-row time { grid-column: 2; }
+}
