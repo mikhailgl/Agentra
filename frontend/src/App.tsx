@@ -39,8 +39,8 @@ type CustomBotBuild = {
   tacticalInstruction: string;
 };
 
-const ARENA_UI_SYNC_MS = 1_000;
-const ROSTER_POLL_MS = 5_000;
+const ARENA_UI_SYNC_MS = 5_000;
+const ROSTER_POLL_MS = 60_000;
 type ActiveView = "arena" | "ludus" | "videos";
 const GeneratedVideosView = lazy(() =>
   import("./components/GeneratedVideosView").then((module) => ({ default: module.GeneratedVideosView })),
@@ -401,35 +401,48 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     let loggedStreamError = false;
-    const unsubscribe = subscribeToArenaStream({
-      onFrame(frame) {
-        if (!cancelled) {
-          setVisualArenaView(frame.arena);
-          setArenaState(frame.arenaState);
-          arenaStateRef.current = frame.arenaState;
-        }
-      },
-      onError(error) {
-        if (!loggedStreamError) {
-          loggedStreamError = true;
-          console.warn("Arena stream interrupted; browser will reconnect", error);
-        }
-      },
-    });
+    let unsubscribe: (() => void) | null = null;
+    const connect = () => {
+      if (cancelled || document.visibilityState !== "visible" || unsubscribe) return;
+      unsubscribe = subscribeToArenaStream({
+        onFrame(frame) {
+          if (!cancelled) {
+            setVisualArenaView(frame.arena);
+            setArenaState(frame.arenaState);
+            arenaStateRef.current = frame.arenaState;
+          }
+        },
+        onError(error) {
+          if (!loggedStreamError) {
+            loggedStreamError = true;
+            console.warn("Arena stream interrupted; browser will reconnect", error);
+          }
+        },
+      });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        connect();
+        return;
+      }
+      unsubscribe?.();
+      unsubscribe = null;
+    };
 
-    if (unsubscribe) {
-      return () => {
-        cancelled = true;
-        unsubscribe();
-      };
-    }
+    connect();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     let requestInFlight = false;
     const sync = () => {
-      if (requestInFlight) return;
+      if (requestInFlight || document.visibilityState !== "visible") return;
       requestInFlight = true;
       void loadArenaSnapshot()
         .then((snapshot) => {
@@ -448,9 +461,14 @@ function App() {
 
     sync();
     const interval = window.setInterval(sync, ARENA_UI_SYNC_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [applyArenaSnapshot]);
 
@@ -458,7 +476,7 @@ function App() {
     let cancelled = false;
     let requestInFlight = false;
     const syncRoster = () => {
-      if (requestInFlight) {
+      if (requestInFlight || document.visibilityState !== "visible") {
         return;
       }
 
@@ -479,9 +497,14 @@ function App() {
 
     syncRoster();
     const interval = window.setInterval(syncRoster, ROSTER_POLL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") syncRoster();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [applyArenaSnapshot]);
 

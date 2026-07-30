@@ -1,3 +1,4 @@
+import compression from "compression";
 import cors from "cors";
 import express from "express";
 import { ArenaCheckpointRepository } from "./arenaCheckpointRepository.js";
@@ -12,6 +13,7 @@ import type { MatchLog } from "../../frontend/src/game/types.js";
 const ARENA_INITIALIZATION_TIMEOUT_MS = 10_000;
 const ARENA_LATE_RESTORE_TIMEOUT_MS = 50_000;
 const ARENA_CHECKPOINT_INTERVAL_MS = 5 * 60_000;
+const ARENA_STREAM_INTERVAL_MS = 500;
 const SPONSOR_DROP_KINDS: ReadonlySet<SponsorDropKind> = new Set(["Knife", "Spear", "Bow", "Axe", "Medkit"]);
 
 const config = getConfig();
@@ -79,6 +81,9 @@ function saveMatchLog(log: MatchLog): void {
 const checkpointTimer = setInterval(() => saveArenaCheckpoint("periodic safety checkpoint"), ARENA_CHECKPOINT_INTERVAL_MS);
 checkpointTimer.unref();
 
+// Compress the long-lived SSE response at the origin so repeated arena frames
+// do not count at their full JSON size against Render's outbound bandwidth.
+app.use(compression());
 app.use(express.json({ limit: "2mb" }));
 app.use(
   cors({
@@ -139,7 +144,7 @@ app.get("/api/match-logs", requireArenaReady, async (request, response, next) =>
 
 app.get("/api/arena/stream", requireArenaReady, (request, response) => {
   response.writeHead(200, {
-    "cache-control": "no-cache, no-transform",
+    "cache-control": "no-cache",
     connection: "keep-alive",
     "content-type": "text/event-stream",
     "x-accel-buffering": "no",
@@ -149,13 +154,15 @@ app.get("/api/arena/stream", requireArenaReady, (request, response) => {
   const sendSnapshot = () => {
     response.write(`event: arena\n`);
     response.write(`data: ${JSON.stringify(arena.getStreamFrame())}\n\n`);
+    response.flush?.();
   };
   const keepAlive = () => {
     response.write(`: keep-alive\n\n`);
+    response.flush?.();
   };
 
   sendSnapshot();
-  const snapshotTimer = setInterval(sendSnapshot, 120);
+  const snapshotTimer = setInterval(sendSnapshot, ARENA_STREAM_INTERVAL_MS);
   const keepAliveTimer = setInterval(keepAlive, 15_000);
 
   request.on("close", () => {
