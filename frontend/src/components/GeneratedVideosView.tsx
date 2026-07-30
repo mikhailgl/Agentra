@@ -32,11 +32,13 @@ export function GeneratedVideosView({
   arenaState,
   onBackToArena,
   onOpenBots,
+  onOpenLeague,
 }: {
   currentMatch: MatchState | null;
   arenaState: ArenaState | null;
   onBackToArena: () => void;
   onOpenBots: () => void;
+  onOpenLeague: () => void;
 }) {
   const [logs, setLogs] = useState<MatchLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,6 +127,9 @@ export function GeneratedVideosView({
           </button>
           <button type="button" className="secondary-button" onClick={onOpenBots}>
             Bots
+          </button>
+          <button type="button" className="secondary-button" onClick={onOpenLeague}>
+            League
           </button>
           <button type="button" className="active">
             Videos
@@ -268,6 +273,8 @@ function createDemoVideo(): GeneratedVideo {
 
 function createVideosFromLog(log: MatchLog): GeneratedVideo[] {
   const winnerName = log.winnerName ?? "No survivor";
+  const eventName = log.competition?.eventName ?? `Match ${log.matchNumber}`;
+  const isChampionship = log.competition?.eventType === "championship";
   const topHighlights = log.highlights
     .filter((event) => event.importance >= 70)
     .sort((a, b) => b.importance - a.importance || a.timestamp - b.timestamp);
@@ -280,7 +287,7 @@ function createVideosFromLog(log: MatchLog): GeneratedVideo[] {
     {
       id: `${log.id}-short`,
       matchNumber: log.matchNumber,
-      title: `${winnerName}'s final stand`,
+      title: isChampionship ? `${winnerName} claims the crown` : `${winnerName}'s final stand`,
       format: "Short",
       durationLabel: "0:45",
       status: "Ready",
@@ -292,7 +299,7 @@ function createVideosFromLog(log: MatchLog): GeneratedVideo[] {
     {
       id: `${log.id}-recap`,
       matchNumber: log.matchNumber,
-      title: `Match ${log.matchNumber} arena recap`,
+      title: `${eventName} recap`,
       format: "Recap",
       durationLabel: "3:20",
       status: "Ready",
@@ -339,6 +346,7 @@ function createRecapBeats(log: MatchLog): string[] {
   const firstKill = log.highlights.find((event) => event.type === "first_blood" || event.type === "kill")?.message;
   const topKiller = [...log.botResults].sort((a, b) => b.kills - a.kills || b.damageDealt - a.damageDealt)[0];
   return [
+    log.competition ? `${log.competition.seasonName}, ${log.competition.eventName}.` : null,
     `${log.entrants.length} entrants loaded into the arena.`,
     firstKill,
     topKiller ? `${topKiller.name} led the damage table with ${topKiller.kills} kills.` : null,
@@ -361,7 +369,8 @@ function createBotStoryBeats(log: MatchLog, bot: MatchLog["botResults"][number] 
 
 function createTags(log: MatchLog, tags: string[]): string[] {
   const killCount = log.botResults.reduce((sum, bot) => sum + bot.kills, 0);
-  return [`${killCount} kills`, formatTime(log.durationMs), ...tags].slice(0, 5);
+  const competitionTags = log.competition ? [`season ${log.competition.seasonNumber}`, log.competition.eventType] : [];
+  return [...competitionTags, `${killCount} kills`, formatTime(log.durationMs), ...tags].slice(0, 5);
 }
 
 async function renderGeneratedVideo(video: GeneratedVideo): Promise<RenderedVideo> {

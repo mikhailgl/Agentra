@@ -229,6 +229,7 @@ export type Bot = {
   affinities: BotAffinities;
   custom?: boolean;
   tacticalInstruction?: string;
+  doctrineSummary?: string;
   inventory: Inventory;
   behavior: BehaviorState;
   lastAttackAt: number;
@@ -436,6 +437,53 @@ export type ArenaState = {
   intermissionEndsAt?: number;
 };
 
+export type LeagueEventType = "league_match" | "headline" | "championship";
+
+export type LeagueStanding = {
+  botId: string;
+  name: string;
+  custom?: boolean;
+  rating: number;
+  division: "Bronze" | "Silver" | "Gold" | "Diamond";
+  points: number;
+  matchesPlayed: number;
+  wins: number;
+  podiums: number;
+  kills: number;
+  damageDealt: number;
+  lastPlacement?: number;
+  form: Array<"W" | "P" | "F">;
+};
+
+export type LeagueChampion = {
+  seasonId: string;
+  seasonNumber: number;
+  seasonName: string;
+  botId: string;
+  botName: string;
+  points: number;
+  wins: number;
+  crownedAt: number;
+};
+
+export type LeagueState = {
+  version: 1;
+  seasonId: string;
+  seasonNumber: number;
+  seasonName: string;
+  status: "active" | "completed";
+  startedAt: number;
+  matchesPerSeason: number;
+  matchesCompleted: number;
+  currentEvent: {
+    type: LeagueEventType;
+    name: string;
+    matchOfSeason: number;
+  };
+  standings: LeagueStanding[];
+  champions: LeagueChampion[];
+};
+
 export type BasicMatchResult = {
   matchNumber: number;
   winnerBotId: string;
@@ -478,6 +526,14 @@ export type MatchLog = {
   highlights: MatchEvent[];
   narrativeMoments: NarrativeMoment[];
   arenaEvents: ArenaEvent[];
+  competition?: {
+    seasonId: string;
+    seasonNumber: number;
+    seasonName: string;
+    eventType: LeagueEventType;
+    eventName: string;
+    matchOfSeason: number;
+  };
 };
 
 export type MatchState = {

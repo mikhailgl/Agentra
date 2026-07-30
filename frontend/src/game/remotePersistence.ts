@@ -1,4 +1,4 @@
-import type { ArenaState, BasicMatchResult, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
+import type { ArenaState, BasicMatchResult, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
 import type { ArenaViewModel } from "../lib/simulation/types";
 
@@ -16,6 +16,7 @@ export type RemoteGameState = {
 export type ArenaSnapshot = {
   match: MatchState;
   arenaState: ArenaState;
+  leagueState: LeagueState;
   persistentBots?: PersistentBot[];
   arenaQueueIds?: string[];
   basicResults?: BasicMatchResult[];

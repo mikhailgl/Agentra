@@ -4,29 +4,32 @@ import { createDefaultPool } from "../../../frontend/src/game/persistence.js";
 import type { PersistentBot } from "../../../frontend/src/game/types.js";
 import { ArenaService, type ArenaCheckpoint } from "../arenaService.js";
 
-test("version 2 checkpoints preserve the persistent roster", () => {
+test("version 3 checkpoints preserve the persistent roster and league", () => {
   const service = new ArenaService();
   const customBot = createCustomBot();
   const snapshot = service.registerCustomBot(customBot, true);
   assert.ok(snapshot);
   assert.ok(snapshot.persistentBots?.some((bot) => bot.id === customBot.id));
+  assert.equal(snapshot.persistentBots?.find((bot) => bot.id === customBot.id)?.tacticalInstruction, undefined);
   assert.equal(snapshot.arenaQueueIds?.[0], customBot.id);
 
   const checkpoint = service.getCheckpoint();
-  assert.equal(checkpoint.version, 2);
+  assert.equal(checkpoint.version, 3);
   assert.ok(checkpoint.persistentBots?.some((bot) => bot.id === customBot.id));
+  assert.ok(checkpoint.leagueState?.standings.some((standing) => standing.botId === customBot.id));
 
   const restored = new ArenaService();
   restored.restore(checkpoint);
   const restoredSnapshot = restored.getSnapshot({ includeRoster: true });
   assert.ok(restoredSnapshot.persistentBots?.some((bot) => bot.id === customBot.id));
   assert.equal(restoredSnapshot.arenaQueueIds?.[0], customBot.id);
+  assert.equal(restoredSnapshot.leagueState.seasonId, checkpoint.leagueState?.seasonId);
 });
 
-test("legacy checkpoints still restore without a persistent roster", () => {
+test("legacy checkpoints still restore without league state", () => {
   const service = new ArenaService();
   const current = service.getCheckpoint();
-  const legacy: ArenaCheckpoint = { ...current, version: 1, persistentBots: undefined };
+  const legacy: ArenaCheckpoint = { ...current, version: 2, leagueState: undefined };
   const restored = new ArenaService();
   assert.doesNotThrow(() => restored.restore(legacy));
   assert.equal(restored.getSnapshot().arenaState.matchNumber, legacy.matchNumber);

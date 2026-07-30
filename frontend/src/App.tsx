@@ -25,7 +25,7 @@ import {
   type ArenaSnapshot,
 } from "./game/remotePersistence";
 import { loadArenaQueue } from "./game/queue";
-import type { ArenaState, BasicMatchResult, BaseStats, BetType, BotAffinities, MatchState, PersistentBot, Psychology } from "./game/types";
+import type { ArenaState, BasicMatchResult, BaseStats, BetType, BotAffinities, LeagueState, MatchState, PersistentBot, Psychology } from "./game/types";
 import type { SponsorDropKind } from "./game/simulation";
 import { toArenaViewModel } from "./lib/simulation/simulationTo3D";
 import type { ArenaViewModel, CameraMode } from "./lib/simulation/types";
@@ -41,9 +41,12 @@ type CustomBotBuild = {
 
 const ARENA_UI_SYNC_MS = 5_000;
 const ROSTER_POLL_MS = 60_000;
-type ActiveView = "arena" | "ludus" | "videos";
+type ActiveView = "arena" | "league" | "ludus" | "videos";
 const GeneratedVideosView = lazy(() =>
   import("./components/GeneratedVideosView").then((module) => ({ default: module.GeneratedVideosView })),
+);
+const LeagueView = lazy(() =>
+  import("./components/LeagueView").then((module) => ({ default: module.LeagueView })),
 );
 
 function App() {
@@ -55,6 +58,7 @@ function App() {
 
   const [matchView, setMatchView] = useState<MatchState | null>(null);
   const [arenaState, setArenaState] = useState<ArenaState | null>(null);
+  const [leagueState, setLeagueState] = useState<LeagueState | null>(null);
   const [visualArenaView, setVisualArenaView] = useState<ArenaViewModel | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow_action");
@@ -117,6 +121,7 @@ function App() {
     arenaStateRef.current = snapshot.arenaState;
     setMatchView(snapshot.match);
     setArenaState(snapshot.arenaState);
+    setLeagueState(snapshot.leagueState);
     if (snapshot.persistentBots) {
       setPersistentBots((current) => mergeArenaRoster(snapshot.persistentBots ?? [], current, playerStateRef.current.ownedBotIds));
     }
@@ -517,6 +522,7 @@ function App() {
         activeBotIds={matchView?.bots.map((bot) => bot.id) ?? []}
         onBackToArena={() => navigateToView("arena")}
         onOpenVideos={() => navigateToView("videos")}
+        onOpenLeague={() => navigateToView("league")}
         onCreateBot={handleCreateCustomBot}
         onEnterBot={handleEnterBot}
         onAddCredits={handleAddCredits}
@@ -535,12 +541,28 @@ function App() {
           arenaState={arenaState}
           onBackToArena={() => navigateToView("arena")}
           onOpenBots={() => navigateToView("ludus")}
+          onOpenLeague={() => navigateToView("league")}
         />
       </Suspense>
     );
   }
 
-  if (!matchView || !arenaState || !renderedArenaView) {
+  if (activeView === "league" && leagueState) {
+    return (
+      <Suspense fallback={<main className="league-shell"><div className="arena-loading" role="status">Loading league...</div></main>}>
+        <LeagueView
+          league={leagueState}
+          match={matchView}
+          ownedBotIds={playerState.ownedBotIds}
+          onBackToArena={() => navigateToView("arena")}
+          onOpenBots={() => navigateToView("ludus")}
+          onOpenVideos={() => navigateToView("videos")}
+        />
+      </Suspense>
+    );
+  }
+
+  if (!matchView || !arenaState || !leagueState || !renderedArenaView) {
     return (
       <main className="app-shell">
         <section className="simulation-area">
@@ -570,6 +592,9 @@ function App() {
             <button type="button" className="secondary-button" onClick={() => navigateToView("ludus")}>
               Bots
             </button>
+            <button type="button" className="secondary-button" onClick={() => navigateToView("league")}>
+              League
+            </button>
             <button type="button" className="secondary-button" onClick={() => navigateToView("videos")}>
               Videos
             </button>
@@ -584,6 +609,7 @@ function App() {
           />
           <SpectatorOverlay
             arenaState={arenaState}
+            leagueState={leagueState}
             bots={matchView.bots}
             queuedBots={queuedBots}
             selectedBot={selectedBot}
@@ -633,7 +659,7 @@ function getInitialActiveView(): ActiveView {
   }
 
   const hash = window.location.hash.replace(/^#/, "");
-  return hash === "ludus" || hash === "videos" ? hash : "arena";
+  return hash === "league" || hash === "ludus" || hash === "videos" ? hash : "arena";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -654,6 +680,11 @@ function getInitialPlayerState() {
 function mergeArenaRoster(serverRoster: PersistentBot[], currentRoster: PersistentBot[], ownedBotIds: string[]): PersistentBot[] {
   const serverIds = new Set(serverRoster.map((bot) => bot.id));
   const ownedIds = new Set(ownedBotIds);
+  const currentById = new Map(currentRoster.map((bot) => [bot.id, bot]));
   const localOwnedBots = currentRoster.filter((bot) => bot.custom && ownedIds.has(bot.id) && !serverIds.has(bot.id));
-  return [...localOwnedBots, ...serverRoster];
+  const hydratedServerRoster = serverRoster.map((bot) => {
+    const local = ownedIds.has(bot.id) ? currentById.get(bot.id) : undefined;
+    return local?.tacticalInstruction ? { ...bot, tacticalInstruction: local.tacticalInstruction } : bot;
+  });
+  return [...localOwnedBots, ...hydratedServerRoster];
 }

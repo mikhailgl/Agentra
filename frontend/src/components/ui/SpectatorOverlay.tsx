@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { formatTime } from "../../format";
-import type { ArenaState, BasicMatchResult, Bot, NarrativeMoment, PersistentBot } from "../../game/types";
+import type { ArenaState, BasicMatchResult, Bot, LeagueState, NarrativeMoment, PersistentBot } from "../../game/types";
 import { getTraitLabels } from "../../game/traits";
 import type { CameraMode } from "../../lib/simulation/types";
 
-type DetailTab = "loadout" | "skills";
+type DetailTab = "loadout" | "skills" | "mind";
 type MatchTableTab = "current" | "queue";
 
 export function SpectatorOverlay({
   arenaState,
+  leagueState,
   bots,
   queuedBots,
   selectedBot,
@@ -24,6 +25,7 @@ export function SpectatorOverlay({
   showIntermissionCard = true,
 }: {
   arenaState: ArenaState;
+  leagueState: LeagueState;
   bots: Bot[];
   queuedBots: PersistentBot[];
   selectedBot: Bot | null;
@@ -58,6 +60,10 @@ export function SpectatorOverlay({
         <div className="metric">
           <span>Match</span>
           <strong>#{arenaState.matchNumber}</strong>
+        </div>
+        <div className="metric league-match-metric">
+          <span>Season {leagueState.seasonNumber}</span>
+          <strong>{leagueState.currentEvent.matchOfSeason}/{leagueState.matchesPerSeason}</strong>
         </div>
         <div className="metric">
           <span>Alive</span>
@@ -261,8 +267,11 @@ function SelectedBotDetails({
         <button type="button" className={activeTab === "skills" ? "active" : ""} onClick={() => onTabChange("skills")}>
           Skills
         </button>
+        <button type="button" className={activeTab === "mind" ? "active" : ""} onClick={() => onTabChange("mind")}>
+          Mind
+        </button>
       </div>
-      {activeTab === "loadout" ? <LoadoutTab bot={bot} /> : <SkillsTab bot={bot} />}
+      {activeTab === "loadout" ? <LoadoutTab bot={bot} /> : activeTab === "skills" ? <SkillsTab bot={bot} /> : <MindTab bot={bot} />}
     </aside>
   );
 }
@@ -300,6 +309,31 @@ function SkillsTab({ bot }: { bot: Bot }) {
   );
 }
 
+function MindTab({ bot }: { bot: Bot }) {
+  const drives = Object.entries(bot.psychology)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name]) => name.replace(/([A-Z])/g, " $1").toLowerCase());
+  const thoughts = bot.thoughts.slice(0, 3);
+
+  return (
+    <div className="bot-detail-grid mind-detail-grid">
+      <DetailRow label="Current intent" value={formatBehavior(bot.behavior)} meta={`${Math.round(bot.health)} hp / ${bot.inventory.weapon?.name ?? "unarmed"}`} />
+      <DetailRow label="Public doctrine" value={bot.doctrineSummary ?? "Autonomous instincts"} meta="A summary is public; the coach's exact instruction stays private." />
+      <DetailRow label="Strongest drives" value={drives.join(" / ")} meta={bot.personality} />
+      <div className="bot-thought-list">
+        <span>Decision trace</span>
+        {thoughts.length ? thoughts.map((thought) => (
+          <article key={thought.id}>
+            <strong>{thought.message}</strong>
+            <small>{formatTime(thought.timeMs)} · {formatBehavior(thought.kind)}</small>
+          </article>
+        )) : <small>No public decision trace yet.</small>}
+      </div>
+    </div>
+  );
+}
+
 function DetailRow({ label, value, meta }: { label: string; value: string; meta: string }) {
   return (
     <article className="bot-detail-row">
@@ -329,4 +363,8 @@ function describeEffects(effects: Record<string, number | undefined>): string {
     return "No modifiers";
   }
   return entries.map(([key, value]) => `${key} ${value > 0 ? "+" : ""}${Math.round(value * 100)}%`).join(" / ");
+}
+
+function formatBehavior(behavior: string): string {
+  return behavior.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 }

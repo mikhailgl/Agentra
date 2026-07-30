@@ -27,6 +27,7 @@ export function LudusView({
   activeBotIds,
   onBackToArena,
   onOpenVideos,
+  onOpenLeague,
   onCreateBot,
   onEnterBot,
   onAddCredits,
@@ -40,6 +41,7 @@ export function LudusView({
   activeBotIds: string[];
   onBackToArena: () => void;
   onOpenVideos: () => void;
+  onOpenLeague: () => void;
   onCreateBot: (build: CustomBotBuild, enterContest: boolean) => Promise<boolean>;
   onEnterBot: (botId: string) => void;
   onAddCredits: () => void;
@@ -73,6 +75,9 @@ export function LudusView({
           </button>
           <button type="button" className="secondary-button" onClick={onOpenVideos}>
             Videos
+          </button>
+          <button type="button" className="secondary-button" onClick={onOpenLeague}>
+            League
           </button>
           <button type="button" onClick={() => setShowCreator(true)} disabled={mutationPending}>
             Create fighter

@@ -1,4 +1,5 @@
 import { createMatchFromPool } from "../../frontend/src/game/createMatch.js";
+import { addLeagueBot, advanceLeagueSeason, applyLeagueMatchResult, createLeagueState, getLeagueEntrantIds } from "../../frontend/src/game/league.js";
 import { createMatchLog } from "../../frontend/src/game/matchLog.js";
 import { DEFAULT_MATCH_CONFIG, getQueueTargetSize } from "../../frontend/src/game/matchConfig.js";
 import {
@@ -10,7 +11,7 @@ import {
 } from "../../frontend/src/game/persistence.js";
 import { createRng, shuffle } from "../../frontend/src/game/random.js";
 import { spawnSponsorDrop, stepSimulation, type SponsorDropKind } from "../../frontend/src/game/simulation.js";
-import type { ArenaState, BaseStats, BasicMatchResult, Bot, BotAffinities, MatchLog, MatchState, PersistentBot, Psychology } from "../../frontend/src/game/types.js";
+import type { ArenaState, BaseStats, BasicMatchResult, Bot, BotAffinities, LeagueState, MatchLog, MatchState, PersistentBot, Psychology } from "../../frontend/src/game/types.js";
 import { toArenaViewModel } from "../../frontend/src/lib/simulation/simulationTo3D.js";
 import type { ArenaViewModel } from "../../frontend/src/lib/simulation/types.js";
 
@@ -26,6 +27,7 @@ const MAX_PUBLIC_JOURNAL_ENTRIES = 6;
 export type ArenaSnapshot = {
   match: MatchState;
   arenaState: ArenaState;
+  leagueState: LeagueState;
   persistentBots?: PersistentBot[];
   arenaQueueIds?: string[];
   basicResults?: BasicMatchResult[];
@@ -40,13 +42,14 @@ export type ArenaStreamFrame = {
 };
 
 export type ArenaCheckpoint = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   matchNumber: number;
   match: MatchState;
   arenaState: ArenaState;
   persistentBots?: PersistentBot[];
   arenaQueueIds: string[];
   basicResults: BasicMatchResult[];
+  leagueState?: LeagueState;
   savedAt: number;
 };
 
@@ -56,6 +59,7 @@ export class ArenaService {
   private arenaQueueIds = this.normalizeQueueIds([]);
   private basicResults: BasicMatchResult[] = [];
   private matchNumber = 1;
+  private leagueState = createLeagueState(this.persistentBots);
   private match: MatchState;
   private arenaState: ArenaState;
   private lastTickAt = Date.now();
@@ -87,6 +91,7 @@ export class ArenaService {
     const snapshot: ArenaSnapshot = {
       match: createPublicMatchSnapshot(this.match),
       arenaState: cloneJson(this.arenaState),
+      leagueState: cloneJson(this.leagueState),
       serverTime: Date.now(),
     };
 
@@ -110,13 +115,14 @@ export class ArenaService {
 
   getCheckpoint(): ArenaCheckpoint {
     return {
-      version: 2,
+      version: 3,
       matchNumber: this.matchNumber,
       match: this.match.finalized ? createPublicMatchSnapshot(this.match, { thoughtLimit: 0 }) : cloneJson(this.match),
       arenaState: cloneJson(this.arenaState),
       persistentBots: cloneJson(this.persistentBots),
       arenaQueueIds: [...this.arenaQueueIds],
       basicResults: cloneJson(this.basicResults),
+      leagueState: cloneJson(this.leagueState),
       savedAt: Date.now(),
     };
   }
@@ -130,6 +136,7 @@ export class ArenaService {
     this.arenaState = cloneJson(checkpoint.arenaState);
     this.arenaQueueIds = this.normalizeQueueIds(checkpoint.arenaQueueIds, new Set(this.match.bots.map((bot) => bot.id)));
     this.basicResults = cloneJson(checkpoint.basicResults).slice(0, MAX_BASIC_RESULTS);
+    this.leagueState = checkpoint.leagueState ? cloneJson(checkpoint.leagueState) : createLeagueState(this.persistentBots);
     this.lastTickAt = Date.now();
   }
 
@@ -147,6 +154,7 @@ export class ArenaService {
   }
 
   startNextMatch(): ArenaSnapshot {
+    this.leagueState = advanceLeagueSeason(this.leagueState, this.persistentBots);
     this.matchNumber += 1;
     this.match = this.createMatch(this.arenaState.lastWinnerId);
     this.arenaState = this.createRunningArenaState(this.match);
@@ -167,6 +175,7 @@ export class ArenaService {
     const existingIndex = this.persistentBots.findIndex((bot) => bot.id === candidate.id);
     if (existingIndex === -1) {
       this.persistentBots.unshift(candidate);
+      this.leagueState = addLeagueBot(this.leagueState, candidate);
     }
 
     if (enqueue && !this.match.bots.some((bot) => bot.id === candidate.id)) {
@@ -227,9 +236,20 @@ export class ArenaService {
       ...this.basicResults.filter((result) => result.matchNumber !== this.matchNumber),
     ].slice(0, MAX_BASIC_RESULTS);
 
-    const matchLog = createMatchLog(this.matchNumber, this.match, endedAt);
+    const matchLog: MatchLog = {
+      ...createMatchLog(this.matchNumber, this.match, endedAt),
+      competition: {
+        seasonId: this.leagueState.seasonId,
+        seasonNumber: this.leagueState.seasonNumber,
+        seasonName: this.leagueState.seasonName,
+        eventType: this.leagueState.currentEvent.type,
+        eventName: this.leagueState.currentEvent.name,
+        matchOfSeason: this.leagueState.currentEvent.matchOfSeason,
+      },
+    };
     this.options.onMatchLogReady?.(matchLog);
     this.applyPersistentProgression();
+    this.leagueState = applyLeagueMatchResult(this.leagueState, this.match, endedAt);
     this.compactCompletedMatch();
 
     this.arenaState = {
@@ -282,7 +302,8 @@ export class ArenaService {
   }
 
   private createMatch(carryOverBotId?: string): MatchState {
-    const entrants = this.takeQueuedEntrants(carryOverBotId);
+    const featuredIds = getLeagueEntrantIds(this.leagueState, this.matchConfig.roster.matchBotCount);
+    const entrants = this.takeQueuedEntrants(carryOverBotId, featuredIds);
     return createMatchFromPool(this.persistentBots, entrants, carryOverBotId, 0, this.matchConfig);
   }
 
@@ -295,11 +316,23 @@ export class ArenaService {
     };
   }
 
-  private takeQueuedEntrants(carryOverBotId?: string): PersistentBot[] {
+  private takeQueuedEntrants(carryOverBotId?: string, featuredIds: string[] = []): PersistentBot[] {
     const carryOverBot = carryOverBotId ? this.persistentBots.find((bot) => bot.id === carryOverBotId) : undefined;
     const selectedIds = new Set<string>(carryOverBot ? [carryOverBot.id] : []);
     const entrants: PersistentBot[] = carryOverBot ? [carryOverBot] : [];
     this.arenaQueueIds = this.normalizeQueueIds(this.arenaQueueIds, selectedIds);
+
+    for (const featuredId of featuredIds) {
+      if (entrants.length >= this.matchConfig.roster.matchBotCount || selectedIds.has(featuredId)) {
+        break;
+      }
+      const featuredBot = this.persistentBots.find((bot) => bot.id === featuredId);
+      if (!featuredBot) {
+        continue;
+      }
+      entrants.push(featuredBot);
+      selectedIds.add(featuredBot.id);
+    }
 
     while (entrants.length < this.matchConfig.roster.matchBotCount) {
       const nextId = this.arenaQueueIds.shift();
@@ -359,7 +392,7 @@ function createPublicMatchSnapshot(match: MatchState, options: { thoughtLimit?: 
   return {
     ...match,
     bots: match.bots.map((bot) => {
-      const { relationships: _relationships, thoughts, ...publicBot } = bot;
+      const { relationships: _relationships, tacticalInstruction: _tacticalInstruction, thoughts, ...publicBot } = bot;
       return {
         ...publicBot,
         relationships: {},
@@ -377,7 +410,7 @@ function createPublicMatchSnapshot(match: MatchState, options: { thoughtLimit?: 
 }
 
 function createPublicPersistentBotSnapshot(bot: PersistentBot): PersistentBot {
-  const { relationships: _relationships, journal, ...publicBot } = bot;
+  const { relationships: _relationships, tacticalInstruction: _tacticalInstruction, journal, ...publicBot } = bot;
   return {
     ...publicBot,
     relationships: {},

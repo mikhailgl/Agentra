@@ -120,6 +120,7 @@ export function clonePersistentBotForMatch(bot: PersistentBot, x: number, y: num
     affinities: cloneAffinities(bot.affinities),
     custom: bot.custom,
     tacticalInstruction: bot.tacticalInstruction,
+    doctrineSummary: bot.doctrineSummary,
     inventory: { weapon: null, armor: null, tool: null },
     behavior: "seeking_loot",
     lastAttackAt: -Infinity,

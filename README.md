@@ -19,6 +19,18 @@ Durable persistence lives in Supabase Postgres:
 - `match_results` stores recent match summaries.
 - `match_logs` stores full completed-match timelines, highlights, entrants, and result stats for video/script generation.
 
+## Persistent League
+
+The canonical arena also owns a persistent competitive season. A season lasts 20 matches and records official points, rating, division, wins, podiums, eliminations, damage, and recent form for every fighter.
+
+- Every fifth match is a headline event that prioritizes the highest-ranked available fighters.
+- The twentieth match is the Season Crown Final, populated from the top of the table.
+- The points leader is added to the permanent Hall of Champions when the season closes.
+- Starting the next match opens a new season while preserving champion history and long-term fighter careers.
+- Match logs include their season and event context so generated recaps can distinguish league matches, headline events, and championships.
+
+League state is part of the versioned canonical arena checkpoint, so standings survive backend restarts and deployments. The public arena API exposes summaries and decision traces but strips exact private coaching instructions from shared roster and match snapshots.
+
 The browser still keeps a localStorage cache so the app starts instantly and can migrate existing local state, but localStorage is no longer the production source of truth. When `VITE_API_BASE_URL` is configured, the frontend syncs durable mutations to the backend, and the backend writes them to Supabase. Redeploying Vercel or Render does not wipe game state because neither service stores important state on local disk.
 
 Supabase row level security is enabled on all public tables. The frontend does not use Supabase keys directly; only the backend uses the server-only service role key.
