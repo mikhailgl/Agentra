@@ -132,7 +132,9 @@ Production branch convention:
 3. Copy the project URL.
 4. Copy the service role key for the backend only. Never expose it in Vercel or frontend code.
 
-No Supabase Storage bucket is required right now because the current app does not upload or persist files/assets. Add Storage later if uploads become product state.
+The generated-media migration provisions a public `match-media` Supabase Storage bucket. Authenticated players can archive generated WebM or MP4 match cuts up to 25 MB; the backend owns uploads and stores searchable metadata in `generated_media`. Keep the service role key on the backend only.
+
+Every completed match also has a durable editorial page at `#story-<match number>`. It combines the canonical result, owner attribution, defining moments, placements, and any archived cuts into one shareable record.
 
 ### Render Deployment
 

@@ -5,6 +5,7 @@ import { ArenaCheckpointRepository } from "./arenaCheckpointRepository.js";
 import { ArenaService, type ArenaCheckpoint } from "./arenaService.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
+import { GeneratedMediaRepository } from "./generatedMediaRepository.js";
 import { MatchLogRepository } from "./matchLogRepository.js";
 import { PlayerAccountRepository } from "./playerAccountRepository.js";
 import { InvalidPlayerSessionError, PlayerActionError, PlayerService } from "./playerService.js";
@@ -25,6 +26,7 @@ const supabase = createSupabaseAdmin(config);
 const repository = new GameStateRepository(supabase);
 const arenaCheckpointRepository = new ArenaCheckpointRepository(supabase);
 const matchLogRepository = new MatchLogRepository(supabase);
+const generatedMediaRepository = new GeneratedMediaRepository(supabase);
 const playerService = new PlayerService(new PlayerAccountRepository(supabase));
 const arena = new ArenaService({
   onCheckpointNeeded: saveArenaCheckpoint,
@@ -166,6 +168,32 @@ app.get("/api/match-logs", requireArenaReady, async (request, response, next) =>
   }
 });
 
+app.get("/api/match-logs/:matchNumber", requireArenaReady, async (request, response, next) => {
+  try {
+    const matchNumber = Number(request.params.matchNumber);
+    if (!Number.isInteger(matchNumber) || matchNumber < 1) {
+      response.status(400).json({ error: "A valid match number is required" });
+      return;
+    }
+    const log = await matchLogRepository.getCanonical(matchNumber);
+    if (!log) {
+      response.status(404).json({ error: "Match story not found" });
+      return;
+    }
+    response.json({ log });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/media", async (request, response, next) => {
+  try {
+    response.json({ media: await generatedMediaRepository.list(Number(request.query.limit ?? 24)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/fantasy/leaderboard", requireArenaReady, async (request, response, next) => {
   try {
     const seasonId = arena.getSnapshot().leagueState.seasonId;
@@ -201,6 +229,35 @@ app.get("/api/player/bots", requireArenaReady, async (request, response, next) =
   try {
     const state = await playerService.getState(getSessionToken(request));
     response.json({ bots: arena.getOwnedBots(state.ownedBotIds) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/player/media", requireArenaReady, express.raw({ type: ["video/webm", "video/mp4"], limit: "25mb" }), async (request, response, next) => {
+  try {
+    const state = await playerService.getState(getSessionToken(request));
+    const matchNumber = Number(request.header("x-match-number"));
+    const title = decodeMediaHeader(request.header("x-media-title")).trim().slice(0, 100);
+    const sourceVideoId = decodeMediaHeader(request.header("x-source-video-id")).trim().slice(0, 180);
+    const mimeType = String(request.header("content-type") ?? "").split(";")[0];
+    const bytes = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+    if (!Number.isInteger(matchNumber) || matchNumber < 1 || !title || !sourceVideoId || !["video/webm", "video/mp4"].includes(mimeType) || bytes.byteLength === 0) {
+      throw new PlayerActionError("A valid generated match video is required");
+    }
+    if (!await matchLogRepository.getCanonical(matchNumber)) {
+      throw new PlayerActionError("Generated media must reference a completed match");
+    }
+    const media = await generatedMediaRepository.upload({
+      accountId: state.accountId,
+      accountName: state.accountName,
+      matchNumber,
+      title,
+      sourceVideoId,
+      mimeType,
+      bytes,
+    });
+    response.status(201).json({ media });
   } catch (error) {
     next(error);
   }
@@ -431,6 +488,15 @@ function isBetType(value: unknown): value is BetType {
 function getSessionToken(request: express.Request): string | undefined {
   const authorization = request.header("authorization");
   return authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : undefined;
+}
+
+function decodeMediaHeader(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
 }
 
 async function initializeArena(): Promise<void> {

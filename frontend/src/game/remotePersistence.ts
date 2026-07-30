@@ -1,4 +1,4 @@
-import type { ArenaState, BasicMatchResult, BetType, FantasyLeaderboardEntry, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
+import type { ArenaState, BasicMatchResult, BetType, FantasyLeaderboardEntry, GeneratedMedia, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
 import type { ArenaViewModel } from "../lib/simulation/types";
 
@@ -241,6 +241,47 @@ export async function loadMatchLogs(limit = 25): Promise<MatchLog[]> {
   return Array.isArray(data.logs) ? data.logs : [];
 }
 
+export async function loadMatchLog(matchNumber: number): Promise<MatchLog | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/match-logs/${encodeURIComponent(String(matchNumber))}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { log: MatchLog }).log;
+}
+
+export async function loadGeneratedMedia(limit = 24): Promise<GeneratedMedia[]> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return [];
+  const response = await fetch(`${apiBaseUrl}/api/media?limit=${encodeURIComponent(String(limit))}`);
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  const body = (await response.json()) as { media?: GeneratedMedia[] };
+  return Array.isArray(body.media) ? body.media : [];
+}
+
+export async function uploadGeneratedMedia(input: {
+  blob: Blob;
+  matchNumber: number;
+  title: string;
+  sourceVideoId: string;
+}): Promise<GeneratedMedia | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/media`, {
+    method: "PUT",
+    headers: {
+      ...getPlayerHeaders(),
+      "content-type": input.blob.type || "video/webm",
+      "x-match-number": String(input.matchNumber),
+      "x-media-title": encodeURIComponent(input.title),
+      "x-source-video-id": encodeURIComponent(input.sourceVideoId),
+    },
+    body: input.blob,
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { media: GeneratedMedia }).media;
+}
+
 export function subscribeToArenaStream({
   onFrame,
   onError,
@@ -318,7 +359,7 @@ async function getArenaActionError(response: Response): Promise<string> {
   return `Arena action failed: ${response.status}`;
 }
 
-function getPlayerHeaders(includeJson = false): HeadersInit {
+function getPlayerHeaders(includeJson = false): Record<string, string> {
   const headers: Record<string, string> = {};
   if (includeJson) headers["content-type"] = "application/json";
   if (typeof window !== "undefined") {

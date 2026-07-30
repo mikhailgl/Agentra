@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../format";
-import { loadMatchLogs } from "../game/remotePersistence";
-import type { ArenaState, MatchLog, MatchState } from "../game/types";
+import { loadGeneratedMedia, loadMatchLogs, uploadGeneratedMedia } from "../game/remotePersistence";
+import type { ArenaState, GeneratedMedia, MatchLog, MatchState } from "../game/types";
 
 type GeneratedVideo = {
   id: string;
@@ -25,7 +25,10 @@ type RenderedVideo = {
   createdAt: number;
   fileName: string;
   mimeType: string;
+  matchNumber: number;
 };
+
+type RenderedVideoOutput = RenderedVideo & { blob: Blob };
 
 export function GeneratedVideosView({
   currentMatch,
@@ -48,15 +51,17 @@ export function GeneratedVideosView({
   const [renderingVideoId, setRenderingVideoId] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderedVideos, setRenderedVideos] = useState<RenderedVideo[]>([]);
+  const [archivedMedia, setArchivedMedia] = useState<GeneratedMedia[]>([]);
   const renderedUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    loadMatchLogs(30)
-      .then((nextLogs) => {
+    Promise.all([loadMatchLogs(30), loadGeneratedMedia(36)])
+      .then(([nextLogs, nextMedia]) => {
         if (!cancelled) {
           setLogs(nextLogs);
+          setArchivedMedia(nextMedia);
           setError(null);
         }
       })
@@ -108,7 +113,25 @@ export function GeneratedVideosView({
     try {
       const rendered = await renderGeneratedVideo(video);
       renderedUrlsRef.current.push(rendered.url);
-      setRenderedVideos((existing) => [rendered, ...existing].slice(0, 6));
+      const { blob, ...localVideo } = rendered;
+      setRenderedVideos((existing) => [localVideo, ...existing].slice(0, 6));
+      if (video.matchNumber > 0) {
+        try {
+          const archived = await uploadGeneratedMedia({
+            blob,
+            matchNumber: video.matchNumber,
+            title: video.title,
+            sourceVideoId: video.id,
+          });
+          if (archived) {
+            setArchivedMedia((existing) => [archived, ...existing.filter((item) => item.id !== archived.id)].slice(0, 36));
+          } else {
+            setRenderError("Video created locally. Connect the arena backend to archive it publicly.");
+          }
+        } catch (archiveError) {
+          setRenderError(`Video created locally, but its public archive failed: ${archiveError instanceof Error ? archiveError.message : "unknown error"}`);
+        }
+      }
     } catch (createError) {
       setRenderError(createError instanceof Error ? createError.message : "Video generation failed.");
     } finally {
@@ -167,8 +190,9 @@ export function GeneratedVideosView({
               ))}
             </div>
             <button type="button" disabled={renderingVideoId !== null} onClick={() => void handleCreateVideo(featuredVideo)}>
-              {renderingVideoId === featuredVideo.id ? "Creating..." : "Create video"}
+              {renderingVideoId === featuredVideo.id ? "Creating and archiving..." : "Create video"}
             </button>
+            {featuredVideo.matchNumber > 0 && <a className="secondary-button" href={`#story-${featuredVideo.matchNumber}`}>Open match story</a>}
           </div>
         </section>
       )}
@@ -190,6 +214,28 @@ export function GeneratedVideosView({
 
       {error && <p className="video-status-note" role="alert">{error}</p>}
       {renderError && <p className="video-status-note" role="alert">{renderError}</p>}
+
+      {archivedMedia.length > 0 && (
+        <section className="rendered-video-library" aria-label="Public video archive">
+          <div className="rendered-video-heading">
+            <span>Public archive</span>
+            <strong>{archivedMedia.length}</strong>
+          </div>
+          <div className="rendered-video-grid">
+            {archivedMedia.map((media) => (
+              <article key={media.id} className="rendered-video-card">
+                <video src={media.publicUrl} controls playsInline preload="metadata" aria-label={`Archived video: ${media.title}`} />
+                <div>
+                  <strong>{media.title}</strong>
+                  <span>Match #{media.matchNumber} · by {media.accountName}</span>
+                  <a className="secondary-button" href={`#story-${media.matchNumber}`}>Open story</a>
+                  <a className="secondary-button" href={media.publicUrl} target="_blank" rel="noreferrer">Open video</a>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {renderedVideos.length > 0 && (
         <section className="rendered-video-library" aria-label="Created videos">
@@ -247,6 +293,7 @@ export function GeneratedVideosView({
                 <button type="button" className="secondary-button" disabled={renderingVideoId !== null} onClick={() => void handleCreateVideo(video)}>
                   {renderingVideoId === video.id ? "Creating..." : "Create video"}
                 </button>
+                {video.matchNumber > 0 && <a className="secondary-button" href={`#story-${video.matchNumber}`}>Open match story</a>}
               </div>
             </article>
           ))}
@@ -379,7 +426,7 @@ function createTags(log: MatchLog, tags: string[]): string[] {
   return [...competitionTags, `${killCount} kills`, formatTime(log.durationMs), ...tags].slice(0, 5);
 }
 
-async function renderGeneratedVideo(video: GeneratedVideo): Promise<RenderedVideo> {
+async function renderGeneratedVideo(video: GeneratedVideo): Promise<RenderedVideoOutput> {
   if (typeof window === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot create videos with MediaRecorder.");
   }
@@ -438,6 +485,7 @@ async function renderGeneratedVideo(video: GeneratedVideo): Promise<RenderedVide
   const extension = outputMimeType.includes("mp4") ? "mp4" : "webm";
   return {
     id: `rendered-${video.id}-${Date.now()}`,
+    blob,
     sourceVideoId: video.id,
     title: video.title,
     url: URL.createObjectURL(blob),
@@ -445,6 +493,7 @@ async function renderGeneratedVideo(video: GeneratedVideo): Promise<RenderedVide
     createdAt: Date.now(),
     fileName: `${slugify(video.title)}.${extension}`,
     mimeType: outputMimeType,
+    matchNumber: video.matchNumber,
   };
 }
 

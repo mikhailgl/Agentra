@@ -569,6 +569,19 @@ export type MatchLog = {
   };
 };
 
+export type GeneratedMedia = {
+  id: string;
+  accountId: string;
+  accountName: string;
+  matchNumber: number;
+  title: string;
+  sourceVideoId: string;
+  mimeType: string;
+  sizeBytes: number;
+  publicUrl: string;
+  createdAt: number;
+};
+
 export type MatchState = {
   id: string;
   config?: MatchConfig;

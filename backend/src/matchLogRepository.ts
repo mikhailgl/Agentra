@@ -39,6 +39,17 @@ export class MatchLogRepository {
 
     return response.data?.map((row) => row.log).filter(isMatchLog) ?? [];
   }
+
+  async getCanonical(matchNumber: number): Promise<MatchLog | null> {
+    const response = await this.supabase
+      .from("match_logs")
+      .select("log")
+      .eq("client_id", CANONICAL_ARENA_ID)
+      .eq("match_number", matchNumber)
+      .maybeSingle();
+    if (response.error) throw response.error;
+    return isMatchLog(response.data?.log) ? response.data.log : null;
+  }
 }
 
 function normalizeLimit(limit: number): number {

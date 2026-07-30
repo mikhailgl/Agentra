@@ -47,7 +47,7 @@ type CustomBotBuild = {
 
 const ARENA_UI_SYNC_MS = 5_000;
 const ROSTER_POLL_MS = 60_000;
-type ActiveView = "arena" | "league" | "fantasy" | "ludus" | "videos";
+type ActiveView = "arena" | "league" | "fantasy" | "ludus" | "videos" | "story";
 const GeneratedVideosView = lazy(() =>
   import("./components/GeneratedVideosView").then((module) => ({ default: module.GeneratedVideosView })),
 );
@@ -56,6 +56,9 @@ const LeagueView = lazy(() =>
 );
 const FantasyView = lazy(() =>
   import("./components/FantasyView").then((module) => ({ default: module.FantasyView })),
+);
+const MatchStoryView = lazy(() =>
+  import("./components/MatchStoryView").then((module) => ({ default: module.MatchStoryView })),
 );
 
 function App() {
@@ -627,6 +630,19 @@ function App() {
     );
   }
 
+  if (activeView === "story") {
+    return (
+      <Suspense fallback={<main className="story-shell"><div className="story-status">Loading story...</div></main>}>
+        <MatchStoryView
+          matchNumber={getStoryMatchNumber()}
+          onBackToArena={() => navigateToView("arena")}
+          onOpenVideos={() => navigateToView("videos")}
+          onOpenLeague={() => navigateToView("league")}
+        />
+      </Suspense>
+    );
+  }
+
   if (activeView === "league" && leagueState) {
     return (
       <Suspense fallback={<main className="league-shell"><div className="arena-loading" role="status">Loading league...</div></main>}>
@@ -757,7 +773,14 @@ function getInitialActiveView(): ActiveView {
   }
 
   const hash = window.location.hash.replace(/^#/, "");
+  if (/^story-\d+$/.test(hash)) return "story";
   return hash === "league" || hash === "fantasy" || hash === "ludus" || hash === "videos" ? hash : "arena";
+}
+
+function getStoryMatchNumber(): number {
+  if (typeof window === "undefined") return 0;
+  const match = window.location.hash.match(/^#story-(\d+)$/);
+  return match ? Number(match[1]) : 0;
 }
 
 function getErrorMessage(error: unknown): string {
