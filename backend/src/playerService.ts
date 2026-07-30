@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { awardCredits, createDefaultPlayerState, placeBet, resolveMatchBets } from "../../frontend/src/game/player.js";
-import type { BetType, MatchState, PlayerState } from "../../frontend/src/game/types.js";
+import type { BetType, FantasyLeaderboardEntry, MatchState, PlayerState } from "../../frontend/src/game/types.js";
 import type { PlayerAccountStore, StoredPlayerAccount } from "./playerAccountRepository.js";
 
 const SESSION_TOKEN_BYTES = 32;
@@ -136,6 +136,61 @@ export class PlayerService {
     return state;
   }
 
+  async setFantasyRoster(rawToken: string | undefined, botIds: string[], validBotIds: Set<string>, seasonId: string): Promise<PlayerState> {
+    const uniqueIds = [...new Set(botIds)].filter((id) => validBotIds.has(id));
+    if (uniqueIds.length !== botIds.length || uniqueIds.length > 5) {
+      throw new PlayerActionError("Choose up to five valid fighters for your fantasy roster");
+    }
+    return this.mutate(rawToken, (state) => ({
+      ...state,
+      draftedBotIds: uniqueIds,
+      fantasy: state.fantasy.seasonId === seasonId
+        ? state.fantasy
+        : { seasonId, points: 0, scoredMatchIds: [], history: [] },
+    }));
+  }
+
+  async scoreFantasyMatch(match: MatchState, seasonId: string): Promise<void> {
+    const botIds = match.bots.map((bot) => bot.id);
+    const accounts = await this.store.listFantasyCandidates(botIds);
+    const placements = new Map(
+      [...match.bots]
+        .sort((a, b) => b.survivalTimeMs - a.survivalTimeMs || b.kills - a.kills || b.damageDealt - a.damageDealt)
+        .map((bot, index) => [bot.id, index + 1]),
+    );
+    await Promise.all(accounts.map((account) => this.mutateAccount(account, (state) => {
+      const currentFantasy = state.fantasy.seasonId === seasonId
+        ? state.fantasy
+        : { seasonId, points: 0, scoredMatchIds: [], history: [] };
+      if (currentFantasy.scoredMatchIds.includes(match.id)) return state;
+      const fighterScores = match.bots
+        .filter((bot) => state.draftedBotIds.includes(bot.id))
+        .map((bot) => {
+          const placement = placements.get(bot.id) ?? match.bots.length;
+          const points = getFantasyPlacementPoints(placement) + bot.kills * 2 + Math.floor(bot.damageDealt / 50);
+          return { botId: bot.id, botName: bot.name, points, placement, kills: bot.kills };
+        });
+      if (fighterScores.length === 0) return state;
+      const matchPoints = fighterScores.reduce((sum, score) => sum + score.points, 0);
+      return {
+        ...state,
+        fantasy: {
+          seasonId,
+          points: currentFantasy.points + matchPoints,
+          scoredMatchIds: [match.id, ...currentFantasy.scoredMatchIds].slice(0, 200),
+          history: [
+            { matchId: match.id, scoredAt: Date.now(), points: matchPoints, fighterScores },
+            ...currentFantasy.history,
+          ].slice(0, 30),
+        },
+      };
+    })));
+  }
+
+  listFantasyLeaderboard(seasonId: string, limit = 50): Promise<FantasyLeaderboardEntry[]> {
+    return this.store.listFantasyLeaderboard(seasonId, limit);
+  }
+
   async resolveMatch(match: MatchState): Promise<void> {
     const winner = match.winnerId ? match.bots.find((bot) => bot.id === match.winnerId) : undefined;
     const accounts = await this.store.listSettlementCandidates(match.id, winner?.custom ? winner.id : undefined);
@@ -187,4 +242,8 @@ function normalizeRecoveryCode(code: string): string {
 
 function formatRecoveryCode(hex: string): string {
   return hex.match(/.{1,6}/g)?.join("-") ?? hex;
+}
+
+function getFantasyPlacementPoints(placement: number): number {
+  return [10, 6, 4, 3, 2, 1][placement - 1] ?? 0;
 }

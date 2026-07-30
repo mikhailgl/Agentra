@@ -1,4 +1,4 @@
-import type { ArenaState, BasicMatchResult, BetType, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
+import type { ArenaState, BasicMatchResult, BetType, FantasyLeaderboardEntry, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
 import type { ArenaViewModel } from "../lib/simulation/types";
 
@@ -171,6 +171,27 @@ export async function placeRemoteBet(matchId: string, type: BetType, botId: stri
   });
   if (!response.ok) throw new Error(await getArenaActionError(response));
   return ((await response.json()) as { state: PlayerState }).state;
+}
+
+export async function saveRemoteFantasyRoster(botIds: string[]): Promise<PlayerState | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/fantasy-roster`, {
+    method: "PUT",
+    headers: getPlayerHeaders(true),
+    body: JSON.stringify({ botIds }),
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { state: PlayerState }).state;
+}
+
+export async function loadFantasyLeaderboard(limit = 50): Promise<FantasyLeaderboardEntry[]> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return [];
+  const response = await fetch(`${apiBaseUrl}/api/fantasy/leaderboard?limit=${encodeURIComponent(String(limit))}`);
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  const body = (await response.json()) as { entries?: FantasyLeaderboardEntry[] };
+  return Array.isArray(body.entries) ? body.entries : [];
 }
 
 export function saveRemoteGameState(state: RemoteGameState): void {

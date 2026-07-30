@@ -110,6 +110,7 @@ function createPlayerState(): PlayerState {
     betHistory: [],
     nudgeHistory: [],
     settledMatchIds: [],
+    fantasy: { seasonId: null, points: 0, scoredMatchIds: [], history: [] },
     stats: {
       totalBetsPlaced: 0,
       totalBetWinnings: 0,

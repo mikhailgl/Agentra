@@ -411,6 +411,12 @@ export type PlayerState = {
   betHistory: Bet[];
   nudgeHistory: Nudge[];
   settledMatchIds: string[];
+  fantasy: {
+    seasonId: string | null;
+    points: number;
+    scoredMatchIds: string[];
+    history: FantasyMatchScore[];
+  };
   stats: {
     totalBetsPlaced: number;
     totalBetWinnings: number;
@@ -418,6 +424,26 @@ export type PlayerState = {
     totalNudgesUsed: number;
     biggestPayout: number;
   };
+};
+
+export type FantasyMatchScore = {
+  matchId: string;
+  scoredAt: number;
+  points: number;
+  fighterScores: Array<{
+    botId: string;
+    botName: string;
+    points: number;
+    placement: number;
+    kills: number;
+  }>;
+};
+
+export type FantasyLeaderboardEntry = {
+  accountId: string;
+  accountName: string;
+  points: number;
+  rosterSize: number;
 };
 
 export type BetResolution = {

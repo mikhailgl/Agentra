@@ -8,6 +8,7 @@ export function LeagueView({
   onBackToArena,
   onOpenBots,
   onOpenVideos,
+  onOpenFantasy,
 }: {
   league: LeagueState;
   match: MatchState | null;
@@ -15,6 +16,7 @@ export function LeagueView({
   onBackToArena: () => void;
   onOpenBots: () => void;
   onOpenVideos: () => void;
+  onOpenFantasy: () => void;
 }) {
   const owned = new Set(ownedBotIds);
   const leader = league.standings[0];
@@ -32,6 +34,7 @@ export function LeagueView({
         <nav className="league-nav" aria-label="Primary views">
           <button type="button" className="secondary-button" onClick={onBackToArena}>Arena</button>
           <button type="button" className="active">League</button>
+          <button type="button" className="secondary-button" onClick={onOpenFantasy}>Fantasy</button>
           <button type="button" className="secondary-button" onClick={onOpenBots}>Bots</button>
           <button type="button" className="secondary-button" onClick={onOpenVideos}>Videos</button>
         </nav>

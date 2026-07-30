@@ -23,6 +23,7 @@ import {
   registerRemoteBot,
   rotateRemoteRecoveryCode,
   saveRemoteGameState,
+  saveRemoteFantasyRoster,
   sendRemoteSponsorDrop,
   subscribeToArenaStream,
   updateRemoteBotDoctrine,
@@ -46,12 +47,15 @@ type CustomBotBuild = {
 
 const ARENA_UI_SYNC_MS = 5_000;
 const ROSTER_POLL_MS = 60_000;
-type ActiveView = "arena" | "league" | "ludus" | "videos";
+type ActiveView = "arena" | "league" | "fantasy" | "ludus" | "videos";
 const GeneratedVideosView = lazy(() =>
   import("./components/GeneratedVideosView").then((module) => ({ default: module.GeneratedVideosView })),
 );
 const LeagueView = lazy(() =>
   import("./components/LeagueView").then((module) => ({ default: module.LeagueView })),
+);
+const FantasyView = lazy(() =>
+  import("./components/FantasyView").then((module) => ({ default: module.FantasyView })),
 );
 
 function App() {
@@ -353,6 +357,21 @@ function App() {
     }
   }, []);
 
+  const handleSaveFantasyRoster = useCallback(async (botIds: string[]): Promise<boolean> => {
+    setArenaActionError(null);
+    try {
+      const state = await saveRemoteFantasyRoster(botIds);
+      if (!state) throw new Error("Arena backend is not configured");
+      playerStateRef.current = state;
+      savePlayerState(state);
+      setPlayerState(state);
+      return true;
+    } catch (error) {
+      setArenaActionError(getErrorMessage(error));
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     if (cameraMode !== "follow_bot") return;
     if (!selectedBotId) {
@@ -579,6 +598,7 @@ function App() {
         onBackToArena={() => navigateToView("arena")}
         onOpenVideos={() => navigateToView("videos")}
         onOpenLeague={() => navigateToView("league")}
+        onOpenFantasy={() => navigateToView("fantasy")}
         onCreateBot={handleCreateCustomBot}
         onEnterBot={handleEnterBot}
         onUpdateDoctrine={handleUpdateDoctrine}
@@ -601,6 +621,7 @@ function App() {
           onBackToArena={() => navigateToView("arena")}
           onOpenBots={() => navigateToView("ludus")}
           onOpenLeague={() => navigateToView("league")}
+          onOpenFantasy={() => navigateToView("fantasy")}
         />
       </Suspense>
     );
@@ -616,6 +637,23 @@ function App() {
           onBackToArena={() => navigateToView("arena")}
           onOpenBots={() => navigateToView("ludus")}
           onOpenVideos={() => navigateToView("videos")}
+          onOpenFantasy={() => navigateToView("fantasy")}
+        />
+      </Suspense>
+    );
+  }
+
+  if (activeView === "fantasy" && leagueState) {
+    return (
+      <Suspense fallback={<main className="fantasy-shell"><div className="arena-loading" role="status">Loading fantasy league...</div></main>}>
+        <FantasyView
+          league={leagueState}
+          bots={persistentBots}
+          player={playerState}
+          onSaveRoster={handleSaveFantasyRoster}
+          onBackToArena={() => navigateToView("arena")}
+          onOpenLeague={() => navigateToView("league")}
+          onOpenBots={() => navigateToView("ludus")}
         />
       </Suspense>
     );
@@ -653,6 +691,9 @@ function App() {
             </button>
             <button type="button" className="secondary-button" onClick={() => navigateToView("league")}>
               League
+            </button>
+            <button type="button" className="secondary-button" onClick={() => navigateToView("fantasy")}>
+              Fantasy
             </button>
             <button type="button" className="secondary-button" onClick={() => navigateToView("videos")}>
               Videos
@@ -716,7 +757,7 @@ function getInitialActiveView(): ActiveView {
   }
 
   const hash = window.location.hash.replace(/^#/, "");
-  return hash === "league" || hash === "ludus" || hash === "videos" ? hash : "arena";
+  return hash === "league" || hash === "fantasy" || hash === "ludus" || hash === "videos" ? hash : "arena";
 }
 
 function getErrorMessage(error: unknown): string {

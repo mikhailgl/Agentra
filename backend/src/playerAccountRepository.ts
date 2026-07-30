@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { PlayerState } from "../../frontend/src/game/types.js";
+import { normalizePlayerState } from "../../frontend/src/game/player.js";
+import type { FantasyLeaderboardEntry, PlayerState } from "../../frontend/src/game/types.js";
 
 export type StoredPlayerAccount = {
   id: string;
@@ -25,6 +26,8 @@ export interface PlayerAccountStore {
   rotateRecoveryToken(id: string, tokenHash: string): Promise<StoredPlayerAccount>;
   save(id: string, state: PlayerState, expectedRevision: number): Promise<StoredPlayerAccount | null>;
   listSettlementCandidates(matchId: string, winnerBotId?: string): Promise<StoredPlayerAccount[]>;
+  listFantasyCandidates(botIds: string[]): Promise<StoredPlayerAccount[]>;
+  listFantasyLeaderboard(seasonId: string, limit: number): Promise<FantasyLeaderboardEntry[]>;
   claimBot(accountId: string, botId: string): Promise<boolean>;
   releaseBot(accountId: string, botId: string): Promise<void>;
 }
@@ -126,6 +129,31 @@ export class PlayerAccountRepository implements PlayerAccountStore {
     throw response.error;
   }
 
+  async listFantasyCandidates(botIds: string[]): Promise<StoredPlayerAccount[]> {
+    if (botIds.length === 0) return [];
+    const filters = botIds.map((botId) => `state->draftedBotIds.cs.${JSON.stringify([botId])}`).join(",");
+    const response = await this.supabase
+      .from("player_accounts")
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
+      .or(filters);
+    if (response.error) throw response.error;
+    return (response.data ?? []).map((row) => fromRow(row as PlayerAccountRow));
+  }
+
+  async listFantasyLeaderboard(seasonId: string, limit: number): Promise<FantasyLeaderboardEntry[]> {
+    const response = await this.supabase.rpc("get_fantasy_leaderboard", {
+      p_season_id: seasonId,
+      p_limit: Math.max(1, Math.min(100, Math.floor(limit))),
+    });
+    if (response.error) throw response.error;
+    return (response.data ?? []).map((row: Record<string, unknown>) => ({
+      accountId: String(row.account_id),
+      accountName: String(row.account_name),
+      points: Number(row.points),
+      rosterSize: Number(row.roster_size),
+    }));
+  }
+
   async releaseBot(accountId: string, botId: string): Promise<void> {
     const response = await this.supabase.from("bot_ownerships").delete().eq("account_id", accountId).eq("bot_id", botId);
     if (response.error) throw response.error;
@@ -133,5 +161,5 @@ export class PlayerAccountRepository implements PlayerAccountStore {
 }
 
 function fromRow(row: PlayerAccountRow): StoredPlayerAccount {
-  return { id: row.id, tokenHash: row.session_token_hash, recoveryTokenHash: row.recovery_token_hash, state: row.state, revision: row.revision };
+  return { id: row.id, tokenHash: row.session_token_hash, recoveryTokenHash: row.recovery_token_hash, state: normalizePlayerState(row.state), revision: row.revision };
 }

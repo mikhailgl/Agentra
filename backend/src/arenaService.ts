@@ -65,7 +65,7 @@ export class ArenaService {
   private lastTickAt = Date.now();
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly options: { onCheckpointNeeded?: (reason: string) => void; onMatchLogReady?: (log: MatchLog) => void; onMatchCompleted?: (match: MatchState) => void } = {}) {
+  constructor(private readonly options: { onCheckpointNeeded?: (reason: string) => void; onMatchLogReady?: (log: MatchLog) => void; onMatchCompleted?: (match: MatchState, competition: MatchLog["competition"]) => void } = {}) {
     this.match = this.createMatch();
     this.arenaState = this.createRunningArenaState(this.match);
   }
@@ -272,7 +272,7 @@ export class ArenaService {
       },
     };
     this.options.onMatchLogReady?.(matchLog);
-    this.options.onMatchCompleted?.(cloneJson(this.match));
+    this.options.onMatchCompleted?.(cloneJson(this.match), matchLog.competition);
     this.applyPersistentProgression();
     this.leagueState = applyLeagueMatchResult(this.leagueState, this.match, endedAt);
     this.compactCompletedMatch();

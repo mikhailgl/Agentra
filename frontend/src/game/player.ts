@@ -266,6 +266,7 @@ export function createDefaultPlayerState(accountId?: string, accountName = "Gues
     betHistory: [],
     nudgeHistory: [],
     settledMatchIds: [],
+    fantasy: { seasonId: null, points: 0, scoredMatchIds: [], history: [] },
     stats: {
       totalBetsPlaced: 0,
       totalBetWinnings: 0,
@@ -276,7 +277,7 @@ export function createDefaultPlayerState(accountId?: string, accountName = "Gues
   };
 }
 
-function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
+export function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
   const fallback = createDefaultPlayerState();
   const accountId = typeof state.accountId === "string" && state.accountId ? state.accountId : fallback.accountId;
   const accountName = typeof state.accountName === "string" && state.accountName.trim() ? state.accountName.trim().slice(0, 32) : fallback.accountName;
@@ -291,6 +292,7 @@ function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
     betHistory: Array.isArray(state.betHistory) ? state.betHistory.filter(isValidBet).map(normalizeBet).slice(0, 80) : [],
     nudgeHistory: Array.isArray(state.nudgeHistory) ? state.nudgeHistory.filter(isValidNudge).slice(0, 120) : [],
     settledMatchIds: Array.isArray(state.settledMatchIds) ? [...new Set(state.settledMatchIds.filter((id): id is string => typeof id === "string"))].slice(0, 200) : [],
+    fantasy: normalizeFantasyState(state.fantasy),
     stats: {
       ...fallback.stats,
       ...state.stats,
@@ -300,6 +302,17 @@ function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
       totalNudgesUsed: Math.max(0, Math.floor(state.stats?.totalNudgesUsed ?? 0)),
       biggestPayout: Math.max(0, Math.floor(state.stats?.biggestPayout ?? 0)),
     },
+  };
+}
+
+function normalizeFantasyState(fantasy: Partial<PlayerState["fantasy"]> | undefined): PlayerState["fantasy"] {
+  return {
+    seasonId: typeof fantasy?.seasonId === "string" ? fantasy.seasonId : null,
+    points: Number.isFinite(fantasy?.points) ? Math.max(0, Math.floor(fantasy?.points ?? 0)) : 0,
+    scoredMatchIds: Array.isArray(fantasy?.scoredMatchIds)
+      ? [...new Set(fantasy.scoredMatchIds.filter((id): id is string => typeof id === "string"))].slice(0, 200)
+      : [],
+    history: Array.isArray(fantasy?.history) ? fantasy.history.slice(0, 30) : [],
   };
 }
 

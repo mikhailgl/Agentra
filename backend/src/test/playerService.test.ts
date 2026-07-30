@@ -55,6 +55,23 @@ class MemoryPlayerStore implements PlayerAccountStore {
     ));
   }
 
+  async listFantasyCandidates(botIds: string[]): Promise<StoredPlayerAccount[]> {
+    return clone([...this.accounts.values()].filter((account) => account.state.draftedBotIds.some((id) => botIds.includes(id))));
+  }
+
+  async listFantasyLeaderboard(seasonId: string, limit: number) {
+    return clone([...this.accounts.values()]
+      .filter((account) => account.state.fantasy.seasonId === seasonId && account.state.fantasy.points > 0)
+      .sort((a, b) => b.state.fantasy.points - a.state.fantasy.points)
+      .slice(0, limit)
+      .map((account) => ({
+        accountId: account.id,
+        accountName: account.state.accountName,
+        points: account.state.fantasy.points,
+        rosterSize: account.state.draftedBotIds.length,
+      })));
+  }
+
   async claimBot(accountId: string, botId: string): Promise<boolean> {
     if (this.botOwners.has(botId)) return false;
     this.botOwners.set(botId, accountId);
@@ -146,6 +163,37 @@ test("predictions and owned-fighter prizes settle exactly once", async () => {
 
   await service.resolveMatch(match);
   assert.equal((await service.getState(token)).credits, 1_075);
+});
+
+test("fantasy rosters score each match once and reset with a new season", async () => {
+  const service = new PlayerService(new MemoryPlayerStore());
+  const opened = await service.openSession();
+  const pool = createDefaultPool();
+  const match = createMatchFromPool(pool, pool.slice(0, 3));
+  match.bots.forEach((bot, index) => {
+    bot.alive = index === 0;
+    bot.survivalTimeMs = 12_000 - index * 1_000;
+    bot.kills = index === 0 ? 2 : 0;
+    bot.damageDealt = index === 0 ? 120 : 0;
+  });
+  await service.setFantasyRoster(opened.sessionToken, [match.bots[0].id], new Set(pool.map((bot) => bot.id)), "season-1");
+
+  await service.scoreFantasyMatch(match, "season-1");
+  await service.scoreFantasyMatch(match, "season-1");
+  const scored = await service.getState(opened.sessionToken);
+  assert.equal(scored.fantasy.points, 16);
+  assert.equal(scored.fantasy.history.length, 1);
+
+  const leaderboard = await service.listFantasyLeaderboard("season-1");
+  assert.equal(leaderboard[0].accountName, scored.accountName);
+  assert.equal(leaderboard[0].points, 16);
+
+  const nextMatch = { ...match, id: `${match.id}-next` };
+  await service.scoreFantasyMatch(nextMatch, "season-2");
+  const reset = await service.getState(opened.sessionToken);
+  assert.equal(reset.fantasy.seasonId, "season-2");
+  assert.equal(reset.fantasy.points, 16);
+  assert.equal(reset.fantasy.history.length, 1);
 });
 
 function clone<T>(value: T): T {

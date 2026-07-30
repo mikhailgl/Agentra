@@ -84,10 +84,13 @@ function saveMatchLog(log: MatchLog): void {
   });
 }
 
-function settleCompletedMatch(match: Parameters<PlayerService["resolveMatch"]>[0]): void {
+function settleCompletedMatch(match: Parameters<PlayerService["resolveMatch"]>[0], competition: MatchLog["competition"]): void {
   const settle = () => {
-    void playerService.resolveMatch(match).catch((error: unknown) => {
-      console.error(`Failed to settle predictions for ${match.id}: ${getErrorMessage(error)}`);
+    void Promise.all([
+      playerService.resolveMatch(match),
+      playerService.scoreFantasyMatch(match, competition?.seasonId ?? "unranked"),
+    ]).catch((error: unknown) => {
+      console.error(`Failed to settle player results for ${match.id}: ${getErrorMessage(error)}`);
     });
   };
   settle();
@@ -163,6 +166,15 @@ app.get("/api/match-logs", requireArenaReady, async (request, response, next) =>
   }
 });
 
+app.get("/api/fantasy/leaderboard", requireArenaReady, async (request, response, next) => {
+  try {
+    const seasonId = arena.getSnapshot().leagueState.seasonId;
+    response.json({ entries: await playerService.listFantasyLeaderboard(seasonId, Number(request.query.limit ?? 50)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/player/session", async (request, response, next) => {
   try {
     const clientId = typeof request.body?.clientId === "string" ? request.body.clientId : "";
@@ -233,6 +245,25 @@ app.post("/api/player/bets", requireArenaReady, async (request, response, next) 
     if (!bot) throw new PlayerActionError("That fighter is not in the current match");
     const odds = getOddsForBetType(bot, snapshot.match.bots, type);
     const state = await playerService.placeBet(getSessionToken(request), snapshot.match, { type, botId, amount, odds });
+    response.json({ state });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/player/fantasy-roster", requireArenaReady, async (request, response, next) => {
+  try {
+    const botIds = Array.isArray(request.body?.botIds)
+      ? request.body.botIds.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    const snapshot = arena.getSnapshot({ includeRoster: true });
+    const validBotIds = new Set(snapshot.persistentBots?.map((bot) => bot.id) ?? []);
+    const state = await playerService.setFantasyRoster(
+      getSessionToken(request),
+      botIds,
+      validBotIds,
+      snapshot.leagueState.seasonId,
+    );
     response.json({ state });
   } catch (error) {
     next(error);

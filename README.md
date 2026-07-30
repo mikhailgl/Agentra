@@ -33,6 +33,16 @@ The canonical arena also owns a persistent competitive season. A season lasts 20
 
 League state is part of the versioned canonical arena checkpoint, so standings survive backend restarts and deployments. The public arena API exposes summaries and decision traces but strips exact private coaching instructions from shared roster and match snapshots.
 
+## Fantasy League
+
+Each player can draft up to five fighters from the public roster. The roster is stored in the authoritative player account and scores automatically after completed matches:
+
+- 10–1 points for a top-six finish.
+- 2 points for every elimination.
+- 1 point for every 50 damage dealt.
+
+Scoring is idempotent per match and resets when the canonical league opens a new season. A server-only Postgres ranking function produces the public coach leaderboard without exposing account credentials or private player state. Fantasy roster updates, scoring, and leaderboard reads are available through the backend API; the browser never writes fantasy points.
+
 The browser still keeps a localStorage cache so the app starts instantly and can migrate existing local state, but localStorage is no longer the production source of truth. When `VITE_API_BASE_URL` is configured, the frontend syncs durable mutations to the backend, and the backend writes them to Supabase. Redeploying Vercel or Render does not wipe game state because neither service stores important state on local disk.
 
 Player sessions are created by the backend with an opaque 256-bit credential. Only its SHA-256 hash is stored in Postgres. Wallet spending, prediction odds and placement, sponsorships, fighter creation/entry, exclusive ownership, doctrine authorization, and post-match settlement are validated server-side with optimistic revision checks. Credits are virtual entertainment currency only; there is no purchase, cash-out, or real-money wagering path.

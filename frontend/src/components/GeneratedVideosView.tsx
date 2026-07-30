@@ -33,12 +33,14 @@ export function GeneratedVideosView({
   onBackToArena,
   onOpenBots,
   onOpenLeague,
+  onOpenFantasy,
 }: {
   currentMatch: MatchState | null;
   arenaState: ArenaState | null;
   onBackToArena: () => void;
   onOpenBots: () => void;
   onOpenLeague: () => void;
+  onOpenFantasy: () => void;
 }) {
   const [logs, setLogs] = useState<MatchLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +132,9 @@ export function GeneratedVideosView({
           </button>
           <button type="button" className="secondary-button" onClick={onOpenLeague}>
             League
+          </button>
+          <button type="button" className="secondary-button" onClick={onOpenFantasy}>
+            Fantasy
           </button>
           <button type="button" className="active">
             Videos
