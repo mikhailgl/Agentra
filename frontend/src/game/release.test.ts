@@ -109,6 +109,7 @@ function createPlayerState(): PlayerState {
     bets: [],
     betHistory: [],
     nudgeHistory: [],
+    settledMatchIds: [],
     stats: {
       totalBetsPlaced: 0,
       totalBetWinnings: 0,

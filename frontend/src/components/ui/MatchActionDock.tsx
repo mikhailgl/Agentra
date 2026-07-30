@@ -15,6 +15,7 @@ export function MatchActionDock({
   onSponsorDrop,
   onCreateBot,
   sponsorDropPending,
+  playerReady,
 }: {
   player: PlayerState;
   bots: Bot[];
@@ -24,6 +25,7 @@ export function MatchActionDock({
   onSponsorDrop: (botId: string, kind: SponsorDropKind) => void;
   onCreateBot: () => void;
   sponsorDropPending: boolean;
+  playerReady: boolean;
 }) {
   const aliveBots = useMemo(() => bots.filter((bot) => bot.alive), [bots]);
   const [betType, setBetType] = useState<BetType>("winner");
@@ -53,15 +55,15 @@ export function MatchActionDock({
           <span>{player.accountName ?? "Guest account"}</span>
           <strong>{player.credits.toLocaleString()} credits</strong>
         </div>
-        <button type="button" className="secondary-button" onClick={onCreateBot}>
+        <button type="button" className="secondary-button" onClick={onCreateBot} disabled={!playerReady}>
           Create bot
         </button>
       </header>
 
-      <section className="betting-card" aria-label="Betting">
+      <section className="betting-card" aria-label="Virtual predictions">
         <div className="betting-card-title">
           <div>
-            <span>Betting</span>
+            <span>Prediction market</span>
             <strong>{betBot?.name ?? "Choose a bot"}</strong>
           </div>
           <div className="odds-pill">
@@ -69,14 +71,14 @@ export function MatchActionDock({
           </div>
         </div>
         <div className="dock-field-row">
-          <select value={betType} onChange={(event) => setBetType(event.target.value as BetType)} aria-label="Bet type">
+          <select value={betType} onChange={(event) => setBetType(event.target.value as BetType)} aria-label="Prediction type">
             {BET_TYPES.map((type) => (
               <option key={type} value={type}>
                 {getBetTypeLabel(type)}
               </option>
             ))}
           </select>
-          <select value={betBotId} onChange={(event) => setBetBotId(event.target.value)} aria-label="Bet bot">
+          <select value={betBotId} onChange={(event) => setBetBotId(event.target.value)} aria-label="Prediction fighter">
             {bots.map((bot) => (
               <option key={bot.id} value={bot.id}>
                 {bot.name}{bot.alive ? "" : " (out)"}
@@ -90,13 +92,13 @@ export function MatchActionDock({
               {value}
             </button>
           ))}
-          <input type="number" min={MIN_BET_AMOUNT} max={player.credits} value={amount} onChange={(event) => setAmount(Number(event.target.value))} aria-label="Bet amount" />
+          <input type="number" min={MIN_BET_AMOUNT} max={player.credits} value={amount} onChange={(event) => setAmount(Number(event.target.value))} aria-label="Prediction amount" />
         </div>
-        <button className="primary-bet-button" type="button" disabled={!betBot || player.credits < betAmount} onClick={() => betBot && onPlaceBet(betType, betBot.id, betAmount, odds)}>
-          Place {betAmount.toLocaleString()} credit bet
+        <button className="primary-bet-button" type="button" disabled={!playerReady || !betBot || player.credits < betAmount} onClick={() => betBot && onPlaceBet(betType, betBot.id, betAmount, odds)}>
+          Lock {betAmount.toLocaleString()} credit prediction
         </button>
         <div className="betting-meta">
-          <span>Potential payout {potentialPayout.toLocaleString()}</span>
+          <span>Potential return {potentialPayout.toLocaleString()}</span>
           <span>{pendingBets.length} active</span>
         </div>
         {latestBet && (

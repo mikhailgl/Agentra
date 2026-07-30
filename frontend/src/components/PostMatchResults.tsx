@@ -57,11 +57,9 @@ export function createPostMatchSummary(
 export function PostMatchResults({
   summary,
   countdownSeconds,
-  onStartNextNow,
 }: {
   summary: PostMatchSummary;
   countdownSeconds: number;
-  onStartNextNow: () => void;
 }) {
   const yourPlacements = summary.placements.filter((placement) => placement.custom);
   const netBetCredits = summary.betResults.reduce((sum, result) => sum + result.net, 0);
@@ -74,15 +72,12 @@ export function PostMatchResults({
           <h2>{summary.winnerName} wins</h2>
           <p>Next match starts in {countdownSeconds}s.</p>
         </div>
-        <button type="button" onClick={onStartNextNow}>
-          Start Next Now
-        </button>
       </header>
 
       <div className="post-match-metrics">
         <ResultMetric label="Extracted" value={`${summary.extractedCredits.toLocaleString()}`} meta="winner loot" />
         <ResultMetric label="Your reward" value={`${summary.awardedCredits.toLocaleString()}`} meta="owned winner payout" />
-        <ResultMetric label="Bets" value={`${netBetCredits >= 0 ? "+" : ""}${netBetCredits.toLocaleString()}`} meta={`${summary.betResults.length} resolved`} />
+        <ResultMetric label="Predictions" value={`${netBetCredits >= 0 ? "+" : ""}${netBetCredits.toLocaleString()}`} meta={`${summary.betResults.length} resolved`} />
       </div>
 
       {yourPlacements.length > 0 && (
@@ -112,7 +107,7 @@ export function PostMatchResults({
 
       {summary.betResults.length > 0 && (
         <section className="bet-results-panel">
-          <h3>Bet Results</h3>
+          <h3>Prediction Results</h3>
           {summary.betResults.map((result) => (
             <article key={result.bet.id} className={result.net >= 0 ? "won" : "lost"}>
               <strong>{getBetTypeLabel(result.bet.type)} on {result.botName}</strong>

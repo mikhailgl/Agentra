@@ -30,7 +30,6 @@ export function LudusView({
   onOpenLeague,
   onCreateBot,
   onEnterBot,
-  onAddCredits,
   onUpdateDoctrine,
   mutationPending,
   actionError,
@@ -44,7 +43,6 @@ export function LudusView({
   onOpenLeague: () => void;
   onCreateBot: (build: CustomBotBuild, enterContest: boolean) => Promise<boolean>;
   onEnterBot: (botId: string) => void;
-  onAddCredits: () => void;
   onUpdateDoctrine: (botId: string, instruction: string) => void;
   mutationPending: boolean;
   actionError: string | null;
@@ -66,10 +64,11 @@ export function LudusView({
           <p>Private doctrine changes how your custom fighters behave across future matches.</p>
         </div>
         <div className="ludus-hero-actions">
-          <button type="button" className="credit-tile" onClick={onAddCredits} title="Add 1,000 credits">
-            <span>Credits</span>
+          <div className="credit-tile" title="Server-authoritative virtual credits">
+            <span>{player.accountName}</span>
             <strong>{player.credits.toLocaleString()}</strong>
-          </button>
+            <small>virtual credits</small>
+          </div>
           <button type="button" className="secondary-button" onClick={onBackToArena}>
             Arena
           </button>
@@ -345,7 +344,7 @@ function PsychologyGrid({ psychology }: { psychology: Psychology }) {
     <div className="psychology-grid">
       {Object.entries(psychology).map(([key, value]) => (
         <div key={key}>
-          <span>{key}</span>
+          <span>{key.replace(/([A-Z])/g, " $1")}</span>
           <strong>{Math.round(value * 100)}</strong>
         </div>
       ))}

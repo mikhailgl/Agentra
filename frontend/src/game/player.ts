@@ -1,5 +1,4 @@
 import { CONTEST_ENTRY_FEE } from "./constants";
-import { saveRemoteGameState } from "./remotePersistence";
 import type { SponsorDropKind } from "./simulation";
 import type { Bet, BetResolution, BetType, Bot, MatchState, Nudge, PlayerState } from "./types";
 
@@ -50,7 +49,6 @@ export function savePlayerState(state: PlayerState): void {
   }
   const normalizedState = normalizePlayerState(state);
   window.localStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(normalizedState));
-  saveRemoteGameState({ playerState: normalizedState });
 }
 
 export function addCredits(amount: number): PlayerState {
@@ -256,10 +254,10 @@ export function getBetTypeLabel(type: BetType): string {
   return "First out";
 }
 
-function createDefaultPlayerState(): PlayerState {
+export function createDefaultPlayerState(accountId?: string, accountName = "Guest account"): PlayerState {
   return {
-    accountId: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    accountName: "Guest account",
+    accountId: accountId ?? `guest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    accountName,
     credits: STARTING_CREDITS,
     ownedBotIds: [],
     favoriteBotIds: [],
@@ -267,6 +265,7 @@ function createDefaultPlayerState(): PlayerState {
     bets: [],
     betHistory: [],
     nudgeHistory: [],
+    settledMatchIds: [],
     stats: {
       totalBetsPlaced: 0,
       totalBetWinnings: 0,
@@ -291,6 +290,7 @@ function normalizePlayerState(state: Partial<PlayerState>): PlayerState {
     bets: Array.isArray(state.bets) ? state.bets.filter(isValidBet).map(normalizeBet) : [],
     betHistory: Array.isArray(state.betHistory) ? state.betHistory.filter(isValidBet).map(normalizeBet).slice(0, 80) : [],
     nudgeHistory: Array.isArray(state.nudgeHistory) ? state.nudgeHistory.filter(isValidNudge).slice(0, 120) : [],
+    settledMatchIds: Array.isArray(state.settledMatchIds) ? [...new Set(state.settledMatchIds.filter((id): id is string => typeof id === "string"))].slice(0, 200) : [],
     stats: {
       ...fallback.stats,
       ...state.stats,

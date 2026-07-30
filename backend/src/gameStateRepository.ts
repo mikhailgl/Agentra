@@ -27,7 +27,8 @@ function normalizePayload(payload: unknown): GameStatePayload {
   const next: GameStatePayload = {};
 
   if (Array.isArray(input.persistentBots)) next.persistentBots = input.persistentBots;
-  if (input.playerState && typeof input.playerState === "object" && !Array.isArray(input.playerState)) next.playerState = input.playerState;
+  // Legacy player state remains readable for one-time ownership migration, but
+  // authoritative wallets and predictions can only mutate via /api/player/*.
   if (input.arenaState === null || (input.arenaState && typeof input.arenaState === "object" && !Array.isArray(input.arenaState))) next.arenaState = input.arenaState;
   if (Array.isArray(input.arenaQueueIds)) next.arenaQueueIds = input.arenaQueueIds.filter((id): id is string => typeof id === "string").slice(0, 100);
   if (Array.isArray(input.basicResults)) next.basicResults = input.basicResults.slice(0, 20);
@@ -70,10 +71,6 @@ export class GameStateRepository {
 
     if (payload.persistentBots) {
       writes.push(this.supabase.from("bot_pools").upsert({ client_id: id, bots: payload.persistentBots, updated_at: new Date().toISOString() }));
-    }
-
-    if (payload.playerState) {
-      writes.push(this.supabase.from("player_states").upsert({ client_id: id, state: payload.playerState, updated_at: new Date().toISOString() }));
     }
 
     if (payload.arenaState !== undefined) {

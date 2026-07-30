@@ -1,9 +1,11 @@
-import type { ArenaState, BasicMatchResult, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
+import type { ArenaState, BasicMatchResult, BetType, LeagueState, MatchLog, MatchState, PersistentBot, PlayerState } from "./types";
 import type { SponsorDropKind } from "./simulation";
 import type { ArenaViewModel } from "../lib/simulation/types";
 
 const CLIENT_ID_KEY = "ai-battle:client-id:v1";
+const PLAYER_SESSION_TOKEN_KEY = "botarena:player-session:v1";
 let remoteSyncEnabled = false;
+let playerSessionPromise: Promise<PlayerState | null> | null = null;
 
 export type RemoteGameState = {
   persistentBots?: PersistentBot[];
@@ -28,6 +30,11 @@ export type ArenaStreamFrame = {
   arena: ArenaViewModel;
   arenaState: ArenaState;
   serverTime: number;
+};
+
+export type AuthenticatedArenaAction = {
+  snapshot: ArenaSnapshot;
+  state: PlayerState;
 };
 
 function getApiBaseUrl(): string | null {
@@ -71,6 +78,50 @@ export async function loadRemoteGameState(): Promise<RemoteGameState | null> {
 
 export function enableRemoteGameStateSync(): void {
   remoteSyncEnabled = true;
+}
+
+export function openRemotePlayerSession(): Promise<PlayerState | null> {
+  if (!playerSessionPromise) {
+    playerSessionPromise = requestRemotePlayerSession().catch((error) => {
+      playerSessionPromise = null;
+      throw error;
+    });
+  }
+  return playerSessionPromise;
+}
+
+async function requestRemotePlayerSession(): Promise<PlayerState | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl || typeof window === "undefined") return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/session`, {
+    method: "POST",
+    headers: getPlayerHeaders(true),
+    body: JSON.stringify({ clientId: getGameClientId() }),
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  const body = (await response.json()) as { state: PlayerState; sessionToken?: string };
+  if (body.sessionToken) window.localStorage.setItem(PLAYER_SESSION_TOKEN_KEY, body.sessionToken);
+  return body.state;
+}
+
+export async function loadRemotePlayer(): Promise<PlayerState | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player`, { headers: getPlayerHeaders() });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { state: PlayerState }).state;
+}
+
+export async function placeRemoteBet(matchId: string, type: BetType, botId: string, amount: number): Promise<PlayerState | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/bets`, {
+    method: "POST",
+    headers: getPlayerHeaders(true),
+    body: JSON.stringify({ matchId, type, botId, amount }),
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { state: PlayerState }).state;
 }
 
 export function saveRemoteGameState(state: RemoteGameState): void {
@@ -147,20 +198,12 @@ export function subscribeToArenaStream({
   };
 }
 
-export async function toggleRemoteArenaPause(): Promise<ArenaSnapshot | null> {
-  return postArenaAction("/api/arena/toggle-pause");
+export async function sendRemoteSponsorDrop(botId: string, kind: SponsorDropKind): Promise<AuthenticatedArenaAction | null> {
+  return postPlayerArenaAction("/api/player/sponsor-drop", { botId, kind });
 }
 
-export async function startRemoteNextMatch(): Promise<ArenaSnapshot | null> {
-  return postArenaAction("/api/arena/start-next");
-}
-
-export async function sendRemoteSponsorDrop(botId: string, kind: SponsorDropKind): Promise<ArenaSnapshot | null> {
-  return postArenaAction("/api/arena/sponsor-drop", { botId, kind });
-}
-
-export async function registerRemoteBot(bot: PersistentBot, enqueue: boolean): Promise<ArenaSnapshot | null> {
-  return postArenaAction("/api/arena/bots", { bot, enqueue });
+export async function registerRemoteBot(bot: PersistentBot, enqueue: boolean): Promise<AuthenticatedArenaAction | null> {
+  return postPlayerArenaAction("/api/player/bots", { bot, enqueue });
 }
 
 export async function updateRemoteBotDoctrine(botId: string, instruction: string): Promise<ArenaSnapshot | null> {
@@ -169,34 +212,28 @@ export async function updateRemoteBotDoctrine(botId: string, instruction: string
     return null;
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/arena/bots/${encodeURIComponent(botId)}/doctrine`, {
+  const response = await fetch(`${apiBaseUrl}/api/player/bots/${encodeURIComponent(botId)}/doctrine`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: getPlayerHeaders(true),
     body: JSON.stringify({ instruction }),
   });
   if (!response.ok) {
     throw new Error(await getArenaActionError(response));
   }
 
-  return (await response.json()) as ArenaSnapshot;
+  return ((await response.json()) as { snapshot: ArenaSnapshot }).snapshot;
 }
 
-async function postArenaAction(path: string, body?: unknown): Promise<ArenaSnapshot | null> {
+async function postPlayerArenaAction(path: string, body: unknown): Promise<AuthenticatedArenaAction | null> {
   const apiBaseUrl = getApiBaseUrl();
-  if (!apiBaseUrl) {
-    return null;
-  }
-
+  if (!apiBaseUrl) return null;
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
-    headers: body ? { "content-type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: getPlayerHeaders(true),
+    body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    throw new Error(await getArenaActionError(response));
-  }
-
-  return (await response.json()) as ArenaSnapshot;
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return (await response.json()) as AuthenticatedArenaAction;
 }
 
 async function getArenaActionError(response: Response): Promise<string> {
@@ -209,4 +246,14 @@ async function getArenaActionError(response: Response): Promise<string> {
     // Fall back to a status-based message when the server did not return JSON.
   }
   return `Arena action failed: ${response.status}`;
+}
+
+function getPlayerHeaders(includeJson = false): HeadersInit {
+  const headers: Record<string, string> = {};
+  if (includeJson) headers["content-type"] = "application/json";
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem(PLAYER_SESSION_TOKEN_KEY);
+    if (token) headers.authorization = `Bearer ${token}`;
+  }
+  return headers;
 }

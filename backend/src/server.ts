@@ -6,9 +6,12 @@ import { ArenaService, type ArenaCheckpoint } from "./arenaService.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
 import { MatchLogRepository } from "./matchLogRepository.js";
+import { PlayerAccountRepository } from "./playerAccountRepository.js";
+import { InvalidPlayerSessionError, PlayerActionError, PlayerService } from "./playerService.js";
 import { createSupabaseAdmin } from "./supabase.js";
+import { BOT_CONTEST_ENTRY_FEE, CUSTOM_BOT_CREATION_COST, getOddsForBetType, getSponsorDropCost } from "../../frontend/src/game/player.js";
 import type { SponsorDropKind } from "../../frontend/src/game/simulation.js";
-import type { MatchLog } from "../../frontend/src/game/types.js";
+import type { BetType, MatchLog } from "../../frontend/src/game/types.js";
 
 const ARENA_INITIALIZATION_TIMEOUT_MS = 10_000;
 const ARENA_LATE_RESTORE_TIMEOUT_MS = 50_000;
@@ -22,7 +25,12 @@ const supabase = createSupabaseAdmin(config);
 const repository = new GameStateRepository(supabase);
 const arenaCheckpointRepository = new ArenaCheckpointRepository(supabase);
 const matchLogRepository = new MatchLogRepository(supabase);
-const arena = new ArenaService({ onCheckpointNeeded: saveArenaCheckpoint, onMatchLogReady: saveMatchLog });
+const playerService = new PlayerService(new PlayerAccountRepository(supabase));
+const arena = new ArenaService({
+  onCheckpointNeeded: saveArenaCheckpoint,
+  onMatchLogReady: saveMatchLog,
+  onMatchCompleted: settleCompletedMatch,
+});
 let arenaReady = false;
 let arenaInitializationInFlight = false;
 let checkpointPersistenceReady = false;
@@ -74,6 +82,19 @@ function saveMatchLog(log: MatchLog): void {
     const message = getErrorMessage(error);
     console.error(`Failed to save match log for match ${log.matchNumber}: ${message}`);
   });
+}
+
+function settleCompletedMatch(match: Parameters<PlayerService["resolveMatch"]>[0]): void {
+  const settle = () => {
+    void playerService.resolveMatch(match).catch((error: unknown) => {
+      console.error(`Failed to settle predictions for ${match.id}: ${getErrorMessage(error)}`);
+    });
+  };
+  settle();
+  for (const delay of [500, 2_000]) {
+    const timer = setTimeout(settle, delay);
+    timer.unref();
+  }
 }
 
 // Match boundaries and player actions already request checkpoints. This slower
@@ -142,6 +163,115 @@ app.get("/api/match-logs", requireArenaReady, async (request, response, next) =>
   }
 });
 
+app.post("/api/player/session", async (request, response, next) => {
+  try {
+    const clientId = typeof request.body?.clientId === "string" ? request.body.clientId : "";
+    const legacy = clientId ? await repository.load(clientId) : {};
+    const ownedBotIds = Array.isArray(legacy.playerState?.ownedBotIds)
+      ? legacy.playerState.ownedBotIds.filter((id): id is string => typeof id === "string")
+      : [];
+    const result = await playerService.openSession(getSessionToken(request), { ownedBotIds });
+    response.status(result.sessionToken ? 201 : 200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/player", async (request, response, next) => {
+  try {
+    response.json({ state: await playerService.getState(getSessionToken(request)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/player/bets", requireArenaReady, async (request, response, next) => {
+  try {
+    const { matchId, type, botId, amount } = (request.body ?? {}) as Record<string, unknown>;
+    const snapshot = arena.getSnapshot();
+    if (matchId !== snapshot.match.id || !isBetType(type) || typeof botId !== "string" || typeof amount !== "number") {
+      throw new PlayerActionError("A valid prediction for the current match is required");
+    }
+    const bot = snapshot.match.bots.find((candidate) => candidate.id === botId);
+    if (!bot) throw new PlayerActionError("That fighter is not in the current match");
+    const odds = getOddsForBetType(bot, snapshot.match.bots, type);
+    const state = await playerService.placeBet(getSessionToken(request), snapshot.match, { type, botId, amount, odds });
+    response.json({ state });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/player/sponsor-drop", requireArenaReady, async (request, response, next) => {
+  const token = getSessionToken(request);
+  const { botId, kind } = (request.body ?? {}) as { botId?: unknown; kind?: unknown };
+  if (typeof botId !== "string" || !isSponsorDropKind(kind)) {
+    next(new PlayerActionError("A valid fighter and sponsor drop are required"));
+    return;
+  }
+
+  const cost = getSponsorDropCost(kind);
+  try {
+    await playerService.charge(token, cost);
+    const snapshot = arena.sponsorDrop(botId, kind);
+    if (!snapshot) {
+      await playerService.refund(token, cost);
+      throw new PlayerActionError("Sponsor drop could not be applied to that fighter");
+    }
+    const state = await playerService.recordSponsorship(token);
+    saveArenaCheckpoint("sponsor drop");
+    response.json({ snapshot, state });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/player/bots", requireArenaReady, async (request, response, next) => {
+  const token = getSessionToken(request);
+  const { bot, enqueue } = (request.body ?? {}) as { bot?: unknown; enqueue?: unknown };
+  const botId = bot && typeof bot === "object" && typeof (bot as { id?: unknown }).id === "string" ? (bot as { id: string }).id : "";
+  try {
+    const currentPlayer = await playerService.getState(token);
+    const alreadyOwned = currentPlayer.ownedBotIds.includes(botId);
+    const currentArena = arena.getSnapshot({ includeRoster: true });
+    if (enqueue === true && (currentArena.arenaQueueIds?.includes(botId) || currentArena.match.bots.some((candidate) => candidate.id === botId))) {
+      throw new PlayerActionError("That fighter is already active or queued");
+    }
+    let state = alreadyOwned
+      ? currentPlayer
+      : await playerService.claimBot(token, botId, CUSTOM_BOT_CREATION_COST);
+    if (alreadyOwned && enqueue === true) {
+      state = await playerService.charge(token, BOT_CONTEST_ENTRY_FEE);
+    }
+
+    const snapshot = arena.registerCustomBot(bot, enqueue === true);
+    if (!snapshot) {
+      state = alreadyOwned && enqueue === true
+        ? await playerService.refund(token, BOT_CONTEST_ENTRY_FEE)
+        : !alreadyOwned
+          ? await playerService.releaseBotClaim(token, botId, CUSTOM_BOT_CREATION_COST)
+          : state;
+      throw new PlayerActionError("A valid custom fighter is required");
+    }
+    response.json({ snapshot, state });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/player/bots/:botId/doctrine", requireArenaReady, async (request, response, next) => {
+  try {
+    await playerService.requireOwnedBot(getSessionToken(request), request.params.botId);
+    const instruction = (request.body as { instruction?: unknown } | undefined)?.instruction;
+    if (typeof instruction !== "string") throw new PlayerActionError("instruction is required");
+    const snapshot = arena.updateBotDoctrine(request.params.botId, instruction);
+    if (!snapshot) throw new PlayerActionError("Custom fighter not found");
+    response.json({ snapshot });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/arena/stream", requireArenaReady, (request, response) => {
   response.writeHead(200, {
     "cache-control": "no-cache",
@@ -172,56 +302,23 @@ app.get("/api/arena/stream", requireArenaReady, (request, response) => {
 });
 
 app.post("/api/arena/toggle-pause", requireArenaReady, (_request, response) => {
-  const snapshot = arena.togglePause();
-  saveArenaCheckpoint("pause toggle");
-  response.json(snapshot);
+  response.status(403).json({ error: "The canonical arena schedule is server-controlled" });
 });
 
 app.post("/api/arena/start-next", requireArenaReady, (_request, response) => {
-  const snapshot = arena.startNextMatch();
-  saveArenaCheckpoint("manual next match");
-  response.json(snapshot);
+  response.status(403).json({ error: "The canonical arena schedule is server-controlled" });
 });
 
 app.post("/api/arena/sponsor-drop", requireArenaReady, (request, response) => {
-  const { botId, kind } = (request.body ?? {}) as { botId?: unknown; kind?: unknown };
-  if (typeof botId !== "string" || !isSponsorDropKind(kind)) {
-    response.status(400).json({ error: "A valid botId and sponsor-drop kind are required" });
-    return;
-  }
-
-  const snapshot = arena.sponsorDrop(botId, kind);
-  if (!snapshot) {
-    response.status(409).json({ error: "Sponsor drop could not be applied to that bot" });
-    return;
-  }
-  saveArenaCheckpoint("sponsor drop");
-  response.json(snapshot);
+  response.status(410).json({ error: "Use the authenticated player sponsor endpoint" });
 });
 
 app.post("/api/arena/bots", requireArenaReady, (request, response) => {
-  const { bot, enqueue } = (request.body ?? {}) as { bot?: unknown; enqueue?: unknown };
-  const snapshot = arena.registerCustomBot(bot, enqueue === true);
-  if (!snapshot) {
-    response.status(400).json({ error: "A valid custom bot is required" });
-    return;
-  }
-  response.json(snapshot);
+  response.status(410).json({ error: "Use the authenticated player fighter endpoint" });
 });
 
 app.put("/api/arena/bots/:botId/doctrine", requireArenaReady, (request, response) => {
-  const instruction = (request.body as { instruction?: unknown } | undefined)?.instruction;
-  if (typeof instruction !== "string") {
-    response.status(400).json({ error: "instruction is required" });
-    return;
-  }
-
-  const snapshot = arena.updateBotDoctrine(request.params.botId, instruction);
-  if (!snapshot) {
-    response.status(404).json({ error: "Custom bot not found" });
-    return;
-  }
-  response.json(snapshot);
+  response.status(410).json({ error: "Use the authenticated player doctrine endpoint" });
 });
 
 app.put("/api/state", async (request, response, next) => {
@@ -235,7 +332,7 @@ app.put("/api/state", async (request, response, next) => {
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   const message = error instanceof Error ? error.message : "Unexpected server error";
-  const status = message === "Invalid client id" ? 400 : 500;
+  const status = error instanceof InvalidPlayerSessionError ? 401 : error instanceof PlayerActionError ? 409 : message === "Invalid client id" ? 400 : 500;
   response.status(status).json({ error: message });
 });
 
@@ -254,6 +351,15 @@ function requireArenaReady(_request: express.Request, response: express.Response
 
 function isSponsorDropKind(value: unknown): value is SponsorDropKind {
   return typeof value === "string" && SPONSOR_DROP_KINDS.has(value as SponsorDropKind);
+}
+
+function isBetType(value: unknown): value is BetType {
+  return typeof value === "string" && ["winner", "top3", "mostKills", "firstEliminated"].includes(value);
+}
+
+function getSessionToken(request: express.Request): string | undefined {
+  const authorization = request.header("authorization");
+  return authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : undefined;
 }
 
 async function initializeArena(): Promise<void> {

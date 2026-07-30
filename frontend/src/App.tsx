@@ -8,19 +8,20 @@ import { MatchActionDock } from "./components/ui/MatchActionDock";
 import { MatchHighlightOverlay } from "./components/ui/MatchHighlightOverlay";
 import { MatchLogOverlay } from "./components/ui/MatchLogOverlay";
 import { SpectatorOverlay } from "./components/ui/SpectatorOverlay";
-import { BOT_CONTEST_ENTRY_FEE, CUSTOM_BOT_CREATION_COST, getPlayerState, getSponsorDropCost, placeBet, resolveMatchBets, savePlayerState, spendCredits, awardCredits } from "./game/player";
+import { CUSTOM_BOT_CREATION_COST, getPlayerState, placeBet, resolveMatchBets, savePlayerState, awardCredits } from "./game/player";
 import { addCustomPersistentBot, loadPersistentBots, removeCustomPersistentBot, savePersistentBots, updatePersistentBotDoctrine } from "./game/persistence";
 import {
   enableRemoteGameStateSync,
   hasArenaBackend,
   loadArenaSnapshot,
+  loadRemotePlayer,
   loadRemoteGameState,
+  openRemotePlayerSession,
+  placeRemoteBet,
   registerRemoteBot,
   saveRemoteGameState,
   sendRemoteSponsorDrop,
-  startRemoteNextMatch,
   subscribeToArenaStream,
-  toggleRemoteArenaPause,
   updateRemoteBotDoctrine,
   type ArenaSnapshot,
 } from "./game/remotePersistence";
@@ -76,6 +77,7 @@ function App() {
   );
   const [sponsorDropPending, setSponsorDropPending] = useState(false);
   const [botMutationPending, setBotMutationPending] = useState(false);
+  const [playerSessionReady, setPlayerSessionReady] = useState(() => !hasArenaBackend());
   const playerStateRef = useRef(playerState);
   const [, forceClockSync] = useState(0);
 
@@ -155,24 +157,6 @@ function App() {
     setPostMatchSummary(null);
   }, []);
 
-  const startNextMatch = useCallback(() => {
-    setArenaActionError(null);
-    void startRemoteNextMatch()
-      .then((snapshot) => {
-        if (snapshot) applyArenaSnapshot(snapshot);
-      })
-      .catch((error) => setArenaActionError(getErrorMessage(error)));
-  }, [applyArenaSnapshot]);
-
-  const togglePause = useCallback(() => {
-    setArenaActionError(null);
-    void toggleRemoteArenaPause()
-      .then((snapshot) => {
-        if (snapshot) applyArenaSnapshot(snapshot);
-      })
-      .catch((error) => setArenaActionError(getErrorMessage(error)));
-  }, [applyArenaSnapshot]);
-
   const selectBot = useCallback((botId: string) => {
     setSelectedBotId(botId);
     setCameraMode("follow_bot");
@@ -188,41 +172,38 @@ function App() {
       return;
     }
 
-    const nextPlayer = placeBet(playerStateRef.current, matchRef.current, type, botId, amount, odds);
-    if (!nextPlayer) {
-      return;
-    }
-    playerStateRef.current = nextPlayer;
-    savePlayerState(nextPlayer);
-    setPlayerState(nextPlayer);
+    const applyPlayer = (nextPlayer: ReturnType<typeof getPlayerState>) => {
+      playerStateRef.current = nextPlayer;
+      savePlayerState(nextPlayer);
+      setPlayerState(nextPlayer);
+    };
+    setArenaActionError(null);
+    void placeRemoteBet(matchRef.current.id, type, botId, amount)
+      .then((remotePlayer) => {
+        if (remotePlayer) {
+          applyPlayer(remotePlayer);
+          return;
+        }
+        const localPlayer = placeBet(playerStateRef.current, matchRef.current as MatchState, type, botId, amount, odds);
+        if (localPlayer) applyPlayer(localPlayer);
+      })
+      .catch((error) => setArenaActionError(getErrorMessage(error)));
   }, []);
 
   const handleSponsorDrop = useCallback((botId: string, kind: SponsorDropKind) => {
     if (sponsorDropInFlightRef.current) {
       return;
     }
-    const chargedPlayer = spendCredits(playerStateRef.current, getSponsorDropCost(kind));
-    if (!chargedPlayer) {
-      return;
-    }
-
     sponsorDropInFlightRef.current = true;
     setSponsorDropPending(true);
     setArenaActionError(null);
     void sendRemoteSponsorDrop(botId, kind)
-      .then((snapshot) => {
-        if (!snapshot) throw new Error("Arena backend is not configured");
-        applyArenaSnapshot(snapshot);
-        const nextPlayer = {
-          ...chargedPlayer,
-          stats: {
-            ...chargedPlayer.stats,
-            totalSponsorshipsSent: chargedPlayer.stats.totalSponsorshipsSent + 1,
-          },
-        };
-        playerStateRef.current = nextPlayer;
-        savePlayerState(nextPlayer);
-        setPlayerState(nextPlayer);
+      .then((result) => {
+        if (!result) throw new Error("Arena backend is not configured");
+        applyArenaSnapshot(result.snapshot);
+        playerStateRef.current = result.state;
+        savePlayerState(result.state);
+        setPlayerState(result.state);
       })
       .catch((error) => setArenaActionError(getErrorMessage(error)))
       .finally(() => {
@@ -233,11 +214,6 @@ function App() {
 
   const handleCreateCustomBot = useCallback(async (build: CustomBotBuild, enterContest: boolean): Promise<boolean> => {
     if (botMutationInFlightRef.current) return false;
-    const chargedPlayer = spendCredits(playerStateRef.current, CUSTOM_BOT_CREATION_COST);
-    if (!chargedPlayer) {
-      return false;
-    }
-
     const [createdBot] = addCustomPersistentBot(build);
     const nextPool = loadPersistentBots();
     setPersistentBots(nextPool);
@@ -249,16 +225,12 @@ function App() {
     setBotMutationPending(true);
     setArenaActionError(null);
     try {
-      const snapshot = await registerRemoteBot(createdBot, enterContest);
-      if (!snapshot) throw new Error("Arena backend is not configured");
-      const nextPlayer = {
-        ...chargedPlayer,
-        ownedBotIds: [...new Set([...chargedPlayer.ownedBotIds, createdBot.id])],
-      };
-      playerStateRef.current = nextPlayer;
-      savePlayerState(nextPlayer);
-      setPlayerState(nextPlayer);
-      applyArenaSnapshot(snapshot);
+      const result = await registerRemoteBot(createdBot, enterContest);
+      if (!result) throw new Error("Arena backend is not configured");
+      playerStateRef.current = result.state;
+      savePlayerState(result.state);
+      setPlayerState(result.state);
+      applyArenaSnapshot(result.snapshot);
       setShowCreator(false);
       return true;
     } catch (error) {
@@ -277,20 +249,16 @@ function App() {
     if (!bot) {
       return;
     }
-    const chargedPlayer = spendCredits(playerStateRef.current, BOT_CONTEST_ENTRY_FEE);
-    if (!chargedPlayer) {
-      return;
-    }
     botMutationInFlightRef.current = true;
     setBotMutationPending(true);
     setArenaActionError(null);
     void registerRemoteBot(bot, true)
-      .then((snapshot) => {
-        if (!snapshot) throw new Error("Arena backend is not configured");
-        playerStateRef.current = chargedPlayer;
-        savePlayerState(chargedPlayer);
-        setPlayerState(chargedPlayer);
-        applyArenaSnapshot(snapshot);
+      .then((result) => {
+        if (!result) throw new Error("Arena backend is not configured");
+        playerStateRef.current = result.state;
+        savePlayerState(result.state);
+        setPlayerState(result.state);
+        applyArenaSnapshot(result.snapshot);
       })
       .catch((error) => setArenaActionError(getErrorMessage(error)))
       .finally(() => {
@@ -298,13 +266,6 @@ function App() {
         setBotMutationPending(false);
       });
   }, [applyArenaSnapshot, persistentBots]);
-
-  const handleAddCredits = useCallback(() => {
-    const nextPlayer = awardCredits(playerStateRef.current, 1000);
-    playerStateRef.current = nextPlayer;
-    savePlayerState(nextPlayer);
-    setPlayerState(nextPlayer);
-  }, []);
 
   const handleUpdateDoctrine = useCallback((botId: string, instruction: string) => {
     if (botMutationInFlightRef.current) return;
@@ -317,7 +278,14 @@ function App() {
     setBotMutationPending(true);
     setArenaActionError(null);
     void registerRemoteBot(updatedBot, false)
-      .then(() => updateRemoteBotDoctrine(botId, instruction))
+      .then((result) => {
+        if (result) {
+          playerStateRef.current = result.state;
+          savePlayerState(result.state);
+          setPlayerState(result.state);
+        }
+        return updateRemoteBotDoctrine(botId, instruction);
+      })
       .then((snapshot) => {
         if (!snapshot) throw new Error("Arena backend is not configured");
         applyArenaSnapshot(snapshot);
@@ -350,7 +318,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    loadRemoteGameState()
+    void loadRemoteGameState()
       .then((remoteState) => {
         if (cancelled || !remoteState) {
           return;
@@ -366,20 +334,13 @@ function App() {
 
         if (!hasRemoteState) {
           enableRemoteGameStateSync();
-          saveRemoteGameState({ playerState, persistentBots: loadPersistentBots() });
+          saveRemoteGameState({ persistentBots: loadPersistentBots() });
           return;
         }
 
         if (remoteState.persistentBots?.length) {
           savePersistentBots(remoteState.persistentBots);
           setPersistentBots(remoteState.persistentBots);
-        }
-
-        if (remoteState.playerState) {
-          savePlayerState(remoteState.playerState);
-          const hydratedPlayer = getPlayerState();
-          playerStateRef.current = hydratedPlayer;
-          setPlayerState(hydratedPlayer);
         }
 
         enableRemoteGameStateSync();
@@ -389,10 +350,40 @@ function App() {
         console.warn("Remote game state hydration failed", error);
       });
 
+    void openRemotePlayerSession()
+      .then((remotePlayer) => {
+        if (cancelled || !remotePlayer) return;
+        playerStateRef.current = remotePlayer;
+        savePlayerState(remotePlayer);
+        setPlayerState(remotePlayer);
+      })
+      .catch((error) => {
+        console.warn("Player session hydration failed", error);
+        setArenaActionError(getErrorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setPlayerSessionReady(true);
+      });
+
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (arenaState?.phase !== "intermission" || !playerSessionReady) return;
+    const timer = window.setTimeout(() => {
+      void loadRemotePlayer()
+        .then((remotePlayer) => {
+          if (!remotePlayer) return;
+          playerStateRef.current = remotePlayer;
+          savePlayerState(remotePlayer);
+          setPlayerState(remotePlayer);
+        })
+        .catch((error) => console.warn("Player settlement sync failed", error));
+    }, 750);
+    return () => window.clearTimeout(timer);
+  }, [arenaState?.matchNumber, arenaState?.phase, playerSessionReady]);
 
   useEffect(() => {
     if (arenaState?.phase !== "intermission") {
@@ -525,9 +516,8 @@ function App() {
         onOpenLeague={() => navigateToView("league")}
         onCreateBot={handleCreateCustomBot}
         onEnterBot={handleEnterBot}
-        onAddCredits={handleAddCredits}
         onUpdateDoctrine={handleUpdateDoctrine}
-        mutationPending={botMutationPending}
+        mutationPending={botMutationPending || !playerSessionReady}
         actionError={arenaActionError}
       />
     );
@@ -618,9 +608,7 @@ function App() {
             cameraMode={cameraMode}
             onSelectBot={selectBot}
             onCameraModeChange={setCameraMode}
-            onTogglePause={togglePause}
             onResetCamera={resetCamera}
-            onStartNextNow={startNextMatch}
             narrativeMoments={matchView.narrativeMoments}
             showIntermissionCard={!postMatchSummary}
           />
@@ -628,7 +616,6 @@ function App() {
             <PostMatchResults
               summary={postMatchSummary}
               countdownSeconds={arenaState.intermissionEndsAt ? Math.max(0, Math.ceil((arenaState.intermissionEndsAt - Date.now()) / 1000)) : 0}
-              onStartNextNow={startNextMatch}
             />
           )}
           <MatchActionDock
@@ -639,10 +626,11 @@ function App() {
             onPlaceBet={handlePlaceBet}
             onSponsorDrop={handleSponsorDrop}
             onCreateBot={() => setShowCreator(true)}
-            sponsorDropPending={sponsorDropPending}
+            sponsorDropPending={sponsorDropPending || !playerSessionReady}
+            playerReady={playerSessionReady}
           />
           {arenaActionError && <div className="arena-action-error" role="alert">{arenaActionError}</div>}
-          {showCreator && <CustomBotCreator credits={playerState.credits} creationCost={CUSTOM_BOT_CREATION_COST} pending={botMutationPending} onClose={() => setShowCreator(false)} onCreate={handleCreateCustomBot} />}
+          {showCreator && <CustomBotCreator credits={playerState.credits} creationCost={CUSTOM_BOT_CREATION_COST} pending={botMutationPending || !playerSessionReady} onClose={() => setShowCreator(false)} onCreate={handleCreateCustomBot} />}
           <MatchHighlightOverlay events={matchView.matchEvents} />
           <MatchLogOverlay events={matchView.events} matchEvents={matchView.matchEvents} selectedBot={selectedBot} />
         </div>

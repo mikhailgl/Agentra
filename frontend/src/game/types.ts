@@ -406,6 +406,7 @@ export type PlayerState = {
   bets: Bet[];
   betHistory: Bet[];
   nudgeHistory: Nudge[];
+  settledMatchIds: string[];
   stats: {
     totalBetsPlaced: number;
     totalBetWinnings: number;

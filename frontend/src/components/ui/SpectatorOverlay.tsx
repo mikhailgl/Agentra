@@ -18,9 +18,7 @@ export function SpectatorOverlay({
   cameraMode,
   onSelectBot,
   onCameraModeChange,
-  onTogglePause,
   onResetCamera,
-  onStartNextNow,
   narrativeMoments,
   showIntermissionCard = true,
 }: {
@@ -36,9 +34,7 @@ export function SpectatorOverlay({
   showIntermissionCard?: boolean;
   onSelectBot: (botId: string) => void;
   onCameraModeChange: (mode: CameraMode) => void;
-  onTogglePause: () => void;
   onResetCamera: () => void;
-  onStartNextNow: () => void;
 }) {
   const [detailTab, setDetailTab] = useState<DetailTab>("loadout");
   const [matchTableTab, setMatchTableTab] = useState<MatchTableTab>("current");
@@ -93,9 +89,6 @@ export function SpectatorOverlay({
             </option>
           ))}
         </select>
-        <button type="button" className="secondary-button" onClick={onTogglePause}>
-          {arenaState.phase === "paused" ? "Resume" : "Pause"}
-        </button>
         <button type="button" className={cameraMode === "free" ? "active" : "secondary-button"} onClick={onResetCamera}>
           Free
         </button>
@@ -197,9 +190,6 @@ export function SpectatorOverlay({
           <span>Intermission</span>
           <h2>{winner ? `${winner.name} wins match #${arenaState.matchNumber}` : `Match #${arenaState.matchNumber} ended`}</h2>
           <p>Next match starts in {countdownSeconds}s.</p>
-          <button type="button" onClick={onStartNextNow}>
-            Start Next Now
-          </button>
         </section>
       )}
     </>

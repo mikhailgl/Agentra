@@ -1936,7 +1936,6 @@ textarea {
   border: 1px solid rgba(242, 196, 83, 0.28);
   border-radius: 8px;
   color: inherit;
-  cursor: pointer;
   display: grid;
   gap: 0.1rem;
   font: inherit;
@@ -1944,14 +1943,13 @@ textarea {
   text-align: left;
 }
 
-.credit-tile:hover,
-.credit-tile:focus-visible {
-  background: rgba(242, 196, 83, 0.16);
-  border-color: rgba(242, 196, 83, 0.5);
-}
-
 .credit-tile strong {
   color: #f2c453;
+}
+
+.credit-tile small {
+  color: #8d9b91;
+  font-size: 0.62rem;
 }
 
 .ludus-layout {
@@ -2938,7 +2936,7 @@ dd {
   align-items: center;
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: 118px 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .psychology-grid span,

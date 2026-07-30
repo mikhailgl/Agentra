@@ -12,7 +12,9 @@ The repo is a small npm workspace monorepo:
 
 Durable persistence lives in Supabase Postgres:
 
-- `player_states` stores wallet, bets, betting history, and sponsor stats.
+- `player_accounts` stores server-authoritative virtual wallets, predictions, sponsor stats, and hashed session credentials.
+- `bot_ownerships` guarantees that each custom fighter belongs to one player account.
+- `player_states` is retained as a read-only legacy source for one-time browser-account ownership migration.
 - `bot_pools` stores bot progression, custom bots, journals, relationships, traits, and doctrine.
 - `arena_states` stores the current resumable arena phase snapshot.
 - `arena_queues` stores queued bot ids.
@@ -33,7 +35,9 @@ League state is part of the versioned canonical arena checkpoint, so standings s
 
 The browser still keeps a localStorage cache so the app starts instantly and can migrate existing local state, but localStorage is no longer the production source of truth. When `VITE_API_BASE_URL` is configured, the frontend syncs durable mutations to the backend, and the backend writes them to Supabase. Redeploying Vercel or Render does not wipe game state because neither service stores important state on local disk.
 
-Supabase row level security is enabled on all public tables. The frontend does not use Supabase keys directly; only the backend uses the server-only service role key.
+Player sessions are created by the backend with an opaque 256-bit credential. Only its SHA-256 hash is stored in Postgres. Wallet spending, prediction odds and placement, sponsorships, fighter creation/entry, exclusive ownership, doctrine authorization, and post-match settlement are validated server-side with optimistic revision checks. Credits are virtual entertainment currency only; there is no purchase, cash-out, or real-money wagering path.
+
+Supabase row level security is enabled on all public tables. The frontend does not use Supabase keys directly; only the backend uses the server-only service role key. Shared arena snapshots expose public doctrine summaries and decision traces, while exact coaching instructions remain private.
 
 ## Local Development
 
