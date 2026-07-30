@@ -281,6 +281,7 @@ function createVideosFromLog(log: MatchLog): GeneratedVideo[] {
   const fallbackEvents = log.events.filter((event) => event.kind === "kill" || event.kind === "winner" || event.kind === "sponsor" || event.kind === "loot");
   const primaryBeats = [...topHighlights.map((event) => event.message), ...fallbackEvents.map((event) => event.message)].filter(Boolean);
   const winner = log.botResults.find((bot) => bot.botId === log.winnerBotId) ?? log.botResults[0];
+  const winnerEntrant = log.entrants.find((bot) => bot.botId === log.winnerBotId);
   const strongest = [...log.botResults].sort((a, b) => b.kills - a.kills || b.damageDealt - a.damageDealt)[0];
 
   return [
@@ -292,7 +293,7 @@ function createVideosFromLog(log: MatchLog): GeneratedVideo[] {
       durationLabel: "0:45",
       status: "Ready",
       winnerName,
-      hook: primaryBeats[0] ?? `${winnerName} outlasted the field in ${formatTime(log.durationMs)}.`,
+      hook: primaryBeats[0] ?? `${winnerName}${winnerEntrant?.ownerName ? `, coached by ${winnerEntrant.ownerName},` : ""} outlasted the field in ${formatTime(log.durationMs)}.`,
       beats: primaryBeats,
       tags: createTags(log, ["vertical", "highlight"]),
     },

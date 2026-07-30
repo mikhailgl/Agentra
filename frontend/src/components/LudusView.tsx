@@ -31,6 +31,10 @@ export function LudusView({
   onCreateBot,
   onEnterBot,
   onUpdateDoctrine,
+  onUpdateAccountName,
+  onRecoverAccount,
+  onRotateRecoveryCode,
+  newRecoveryCode,
   mutationPending,
   actionError,
 }: {
@@ -44,15 +48,20 @@ export function LudusView({
   onCreateBot: (build: CustomBotBuild, enterContest: boolean) => Promise<boolean>;
   onEnterBot: (botId: string) => void;
   onUpdateDoctrine: (botId: string, instruction: string) => void;
+  onUpdateAccountName: (name: string) => Promise<boolean>;
+  onRecoverAccount: (recoveryCode: string) => Promise<boolean>;
+  onRotateRecoveryCode: () => Promise<string | null>;
+  newRecoveryCode: string | null;
   mutationPending: boolean;
   actionError: string | null;
 }) {
   const ownedBotIds = useMemo(() => new Set(player.ownedBotIds), [player.ownedBotIds]);
   const ownedBots = useMemo(() => bots.filter((bot) => bot.custom && ownedBotIds.has(bot.id)), [bots, ownedBotIds]);
-  const publicBots = useMemo(() => bots.filter((bot) => !bot.custom).slice(0, 8), [bots]);
+  const publicBots = useMemo(() => bots.filter((bot) => !ownedBotIds.has(bot.id)).slice(0, 12), [bots, ownedBotIds]);
   const [selectedBotId, setSelectedBotId] = useState(() => ownedBots[0]?.id ?? bots[0]?.id ?? "");
   const [tab, setTab] = useState<LudusTab>("profile");
   const [showCreator, setShowCreator] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const selectedBot = bots.find((bot) => bot.id === selectedBotId) ?? ownedBots[0] ?? bots[0] ?? null;
 
   return (
@@ -69,6 +78,9 @@ export function LudusView({
             <strong>{player.credits.toLocaleString()}</strong>
             <small>virtual credits</small>
           </div>
+          <button type="button" className="secondary-button" onClick={() => setShowAccount(true)}>
+            {newRecoveryCode ? "Save account key" : "Account"}
+          </button>
           <button type="button" className="secondary-button" onClick={onBackToArena}>
             Arena
           </button>
@@ -116,7 +128,8 @@ export function LudusView({
           <section className="ludus-profile">
             <BotProfileHeader
               bot={selectedBot}
-              canEnter={Boolean(selectedBot.custom) && !queuedBotIds.includes(selectedBot.id) && !activeBotIds.includes(selectedBot.id)}
+              isOwned={ownedBotIds.has(selectedBot.id)}
+              canEnter={ownedBotIds.has(selectedBot.id) && !queuedBotIds.includes(selectedBot.id) && !activeBotIds.includes(selectedBot.id)}
               isQueued={queuedBotIds.includes(selectedBot.id)}
               isActive={activeBotIds.includes(selectedBot.id)}
               canAfford={player.credits >= BOT_CONTEST_ENTRY_FEE}
@@ -132,7 +145,7 @@ export function LudusView({
             </nav>
             {tab === "profile" && <ProfileTab bot={selectedBot} />}
             {tab === "journal" && <JournalTab bot={selectedBot} />}
-            {tab === "doctrine" && <DoctrineTab bot={selectedBot} onUpdateDoctrine={onUpdateDoctrine} pending={mutationPending} />}
+            {tab === "doctrine" && <DoctrineTab bot={selectedBot} canCoach={ownedBotIds.has(selectedBot.id)} onUpdateDoctrine={onUpdateDoctrine} pending={mutationPending} />}
           </section>
         ) : (
           <section className="ludus-profile empty-ludus">
@@ -160,7 +173,102 @@ export function LudusView({
           }}
         />
       )}
+      {showAccount && (
+        <AccountPanel
+          player={player}
+          recoveryCode={newRecoveryCode}
+          onClose={() => setShowAccount(false)}
+          onUpdateName={onUpdateAccountName}
+          onRecover={onRecoverAccount}
+          onRotateRecoveryCode={onRotateRecoveryCode}
+        />
+      )}
     </main>
+  );
+}
+
+function AccountPanel({
+  player,
+  recoveryCode,
+  onClose,
+  onUpdateName,
+  onRecover,
+  onRotateRecoveryCode,
+}: {
+  player: PlayerState;
+  recoveryCode: string | null;
+  onClose: () => void;
+  onUpdateName: (name: string) => Promise<boolean>;
+  onRecover: (recoveryCode: string) => Promise<boolean>;
+  onRotateRecoveryCode: () => Promise<string | null>;
+}) {
+  const [name, setName] = useState(player.accountName);
+  const [recoveryDraft, setRecoveryDraft] = useState("");
+  const [visibleRecoveryCode, setVisibleRecoveryCode] = useState(recoveryCode);
+  const [pending, setPending] = useState(false);
+
+  const saveName = async () => {
+    setPending(true);
+    const saved = await onUpdateName(name);
+    setPending(false);
+    if (saved) setName(name.trim());
+  };
+
+  const recover = async () => {
+    setPending(true);
+    const recovered = await onRecover(recoveryDraft);
+    setPending(false);
+    if (recovered) onClose();
+  };
+
+  const rotateKey = async () => {
+    setPending(true);
+    setVisibleRecoveryCode(await onRotateRecoveryCode());
+    setPending(false);
+  };
+
+  return (
+    <div className="modal-backdrop account-backdrop" role="presentation">
+      <section className="account-panel" role="dialog" aria-modal="true" aria-labelledby="account-title">
+        <header className="modal-title-row">
+          <div><span>Player identity</span><h2 id="account-title">Your arena account</h2></div>
+          <button type="button" className="secondary-button" onClick={onClose}>Close</button>
+        </header>
+
+        <div className="account-section">
+          <label htmlFor="arena-name">Public arena name</label>
+          <div className="account-field-row">
+            <input id="arena-name" value={name} maxLength={24} onChange={(event) => setName(event.target.value)} disabled={pending} />
+            <button type="button" onClick={() => void saveName()} disabled={pending || name.trim() === player.accountName}>Save name</button>
+          </div>
+          <small>This name appears on your fighters, league entries, and generated stories.</small>
+        </div>
+
+        <div className="account-section recovery-section">
+          <span>Recovery key</span>
+          {visibleRecoveryCode ? (
+            <>
+              <code>{visibleRecoveryCode}</code>
+              <strong>Save this key now. It is only shown once and restores your account on another browser.</strong>
+            </>
+          ) : (
+            <p>Create a fresh recovery key if the original was not saved. Creating one invalidates the previous key.</p>
+          )}
+          <button type="button" className="secondary-button" onClick={() => void rotateKey()} disabled={pending}>
+            {visibleRecoveryCode ? "Replace recovery key" : "Create new recovery key"}
+          </button>
+        </div>
+
+        <div className="account-section">
+          <label htmlFor="recovery-key">Restore an existing account</label>
+          <div className="account-field-row">
+            <input id="recovery-key" value={recoveryDraft} onChange={(event) => setRecoveryDraft(event.target.value)} placeholder="xxxxxx-xxxxxx-xxxxxx-xxxxxx-xxxxxx-xxxxxx" disabled={pending} />
+            <button type="button" onClick={() => void recover()} disabled={pending || recoveryDraft.trim().length < 36}>Restore</button>
+          </div>
+          <small>Restoring rotates that account's browser session and signs this browser into it.</small>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -206,6 +314,7 @@ function RosterSection({
 
 function BotProfileHeader({
   bot,
+  isOwned,
   canEnter,
   isQueued,
   isActive,
@@ -214,6 +323,7 @@ function BotProfileHeader({
   onEnter,
 }: {
   bot: PersistentBot;
+  isOwned: boolean;
   canEnter: boolean;
   isQueued: boolean;
   isActive: boolean;
@@ -227,7 +337,7 @@ function BotProfileHeader({
         {bot.name.slice(0, 1).toUpperCase()}
       </div>
       <div>
-        <span>{bot.custom ? "Owned fighter" : "Public fighter"}</span>
+        <span>{isOwned ? "Your fighter" : bot.ownerName ? `Fighter by ${bot.ownerName}` : "Arena fighter"}</span>
         <h2>{bot.name}</h2>
         <p>{bot.doctrineSummary ?? "Autonomous instincts"}</p>
       </div>
@@ -299,9 +409,9 @@ function JournalTab({ bot }: { bot: PersistentBot }) {
   );
 }
 
-function DoctrineTab({ bot, onUpdateDoctrine, pending }: { bot: PersistentBot; onUpdateDoctrine: (botId: string, instruction: string) => void; pending: boolean }) {
+function DoctrineTab({ bot, canCoach, onUpdateDoctrine, pending }: { bot: PersistentBot; canCoach: boolean; onUpdateDoctrine: (botId: string, instruction: string) => void; pending: boolean }) {
   const [draft, setDraft] = useState(bot.tacticalInstruction ?? "");
-  const disabled = !bot.custom;
+  const disabled = !canCoach;
   return (
     <section className="ludus-card doctrine-card">
       <h3>Private Doctrine</h3>

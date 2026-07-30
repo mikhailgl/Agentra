@@ -4,6 +4,7 @@ import type { PlayerState } from "../../frontend/src/game/types.js";
 export type StoredPlayerAccount = {
   id: string;
   tokenHash: string;
+  recoveryTokenHash: string;
   state: PlayerState;
   revision: number;
 };
@@ -11,13 +12,17 @@ export type StoredPlayerAccount = {
 type PlayerAccountRow = {
   id: string;
   session_token_hash: string;
+  recovery_token_hash: string;
   state: PlayerState;
   revision: number;
 };
 
 export interface PlayerAccountStore {
   findByTokenHash(tokenHash: string): Promise<StoredPlayerAccount | null>;
-  create(id: string, tokenHash: string, state: PlayerState): Promise<StoredPlayerAccount>;
+  findByRecoveryTokenHash(tokenHash: string): Promise<StoredPlayerAccount | null>;
+  create(id: string, tokenHash: string, recoveryTokenHash: string, state: PlayerState): Promise<StoredPlayerAccount>;
+  rotateSessionToken(id: string, tokenHash: string): Promise<StoredPlayerAccount>;
+  rotateRecoveryToken(id: string, tokenHash: string): Promise<StoredPlayerAccount>;
   save(id: string, state: PlayerState, expectedRevision: number): Promise<StoredPlayerAccount | null>;
   listSettlementCandidates(matchId: string, winnerBotId?: string): Promise<StoredPlayerAccount[]>;
   claimBot(accountId: string, botId: string): Promise<boolean>;
@@ -30,18 +35,50 @@ export class PlayerAccountRepository implements PlayerAccountStore {
   async findByTokenHash(tokenHash: string): Promise<StoredPlayerAccount | null> {
     const response = await this.supabase
       .from("player_accounts")
-      .select("id, session_token_hash, state, revision")
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
       .eq("session_token_hash", tokenHash)
       .maybeSingle();
     if (response.error) throw response.error;
     return response.data ? fromRow(response.data as PlayerAccountRow) : null;
   }
 
-  async create(id: string, tokenHash: string, state: PlayerState): Promise<StoredPlayerAccount> {
+  async findByRecoveryTokenHash(tokenHash: string): Promise<StoredPlayerAccount | null> {
     const response = await this.supabase
       .from("player_accounts")
-      .insert({ id, session_token_hash: tokenHash, state, revision: 1 })
-      .select("id, session_token_hash, state, revision")
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
+      .eq("recovery_token_hash", tokenHash)
+      .maybeSingle();
+    if (response.error) throw response.error;
+    return response.data ? fromRow(response.data as PlayerAccountRow) : null;
+  }
+
+  async create(id: string, tokenHash: string, recoveryTokenHash: string, state: PlayerState): Promise<StoredPlayerAccount> {
+    const response = await this.supabase
+      .from("player_accounts")
+      .insert({ id, session_token_hash: tokenHash, recovery_token_hash: recoveryTokenHash, state, revision: 1 })
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
+      .single();
+    if (response.error) throw response.error;
+    return fromRow(response.data as PlayerAccountRow);
+  }
+
+  async rotateSessionToken(id: string, tokenHash: string): Promise<StoredPlayerAccount> {
+    const response = await this.supabase
+      .from("player_accounts")
+      .update({ session_token_hash: tokenHash, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
+      .single();
+    if (response.error) throw response.error;
+    return fromRow(response.data as PlayerAccountRow);
+  }
+
+  async rotateRecoveryToken(id: string, tokenHash: string): Promise<StoredPlayerAccount> {
+    const response = await this.supabase
+      .from("player_accounts")
+      .update({ recovery_token_hash: tokenHash, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
       .single();
     if (response.error) throw response.error;
     return fromRow(response.data as PlayerAccountRow);
@@ -53,7 +90,7 @@ export class PlayerAccountRepository implements PlayerAccountStore {
       .update({ state, revision: expectedRevision + 1, updated_at: new Date().toISOString() })
       .eq("id", id)
       .eq("revision", expectedRevision)
-      .select("id, session_token_hash, state, revision")
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
       .maybeSingle();
     if (response.error) throw response.error;
     return response.data ? fromRow(response.data as PlayerAccountRow) : null;
@@ -67,12 +104,12 @@ export class PlayerAccountRepository implements PlayerAccountStore {
     const ownerId = ownerResponse.data?.account_id as string | undefined;
     const pendingRequest = this.supabase
       .from("player_accounts")
-      .select("id, session_token_hash, state, revision")
+      .select("id, session_token_hash, recovery_token_hash, state, revision")
       .contains("state->bets", [{ matchId, status: "pending" }]);
     const [pendingResponse, ownerAccountResponse] = await Promise.all([
       pendingRequest,
       ownerId
-        ? this.supabase.from("player_accounts").select("id, session_token_hash, state, revision").eq("id", ownerId).maybeSingle()
+        ? this.supabase.from("player_accounts").select("id, session_token_hash, recovery_token_hash, state, revision").eq("id", ownerId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
     ]);
     if (pendingResponse.error) throw pendingResponse.error;
@@ -96,5 +133,5 @@ export class PlayerAccountRepository implements PlayerAccountStore {
 }
 
 function fromRow(row: PlayerAccountRow): StoredPlayerAccount {
-  return { id: row.id, tokenHash: row.session_token_hash, state: row.state, revision: row.revision };
+  return { id: row.id, tokenHash: row.session_token_hash, recoveryTokenHash: row.recovery_token_hash, state: row.state, revision: row.revision };
 }

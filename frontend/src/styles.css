@@ -1952,6 +1952,99 @@ textarea {
   font-size: 0.62rem;
 }
 
+.account-backdrop {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 40;
+}
+
+.account-panel {
+  background: #101713;
+  border: 1px solid rgba(242, 196, 83, 0.3);
+  border-radius: 14px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+  display: grid;
+  gap: 1rem;
+  max-height: calc(100vh - 2rem);
+  max-width: 680px;
+  overflow: auto;
+  padding: 1.2rem;
+  width: 100%;
+}
+
+.account-panel h2 {
+  margin: 0.2rem 0 0;
+}
+
+.account-section {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem;
+}
+
+.account-section label,
+.account-section > span {
+  color: #f2c453;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.account-section small,
+.account-section p {
+  color: #9eaca2;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.account-field-row {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.account-field-row input {
+  background: #080d0a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: #edf4ee;
+  font: inherit;
+  min-width: 0;
+  padding: 0.7rem;
+}
+
+.recovery-section code {
+  background: #080d0a;
+  border: 1px solid rgba(242, 196, 83, 0.25);
+  border-radius: 8px;
+  color: #f5d77f;
+  font-size: clamp(0.75rem, 2.2vw, 1rem);
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+  padding: 0.85rem;
+  user-select: all;
+}
+
+.recovery-section strong {
+  color: #dce8df;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 560px) {
+  .account-field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ludus-layout {
   display: grid;
   gap: 1rem;

@@ -185,6 +185,43 @@ app.get("/api/player", async (request, response, next) => {
   }
 });
 
+app.get("/api/player/bots", requireArenaReady, async (request, response, next) => {
+  try {
+    const state = await playerService.getState(getSessionToken(request));
+    response.json({ bots: arena.getOwnedBots(state.ownedBotIds) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/player/recover", async (request, response, next) => {
+  try {
+    const recoveryCode = typeof request.body?.recoveryCode === "string" ? request.body.recoveryCode : "";
+    response.json(await playerService.recoverSession(recoveryCode));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/player/recovery-code", async (request, response, next) => {
+  try {
+    response.json(await playerService.rotateRecoveryCode(getSessionToken(request)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/player", requireArenaReady, async (request, response, next) => {
+  try {
+    const name = typeof request.body?.name === "string" ? request.body.name : "";
+    const state = await playerService.updateAccountName(getSessionToken(request), name);
+    const snapshot = arena.updateOwnerName(state.accountId, state.accountName);
+    response.json({ state, snapshot });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/player/bets", requireArenaReady, async (request, response, next) => {
   try {
     const { matchId, type, botId, amount } = (request.body ?? {}) as Record<string, unknown>;
@@ -244,7 +281,10 @@ app.post("/api/player/bots", requireArenaReady, async (request, response, next) 
       state = await playerService.charge(token, BOT_CONTEST_ENTRY_FEE);
     }
 
-    const snapshot = arena.registerCustomBot(bot, enqueue === true);
+    const ownedBot = bot && typeof bot === "object"
+      ? { ...(bot as Record<string, unknown>), ownerId: state.accountId, ownerName: state.accountName }
+      : bot;
+    const snapshot = arena.registerCustomBot(ownedBot, enqueue === true);
     if (!snapshot) {
       state = alreadyOwned && enqueue === true
         ? await playerService.refund(token, BOT_CONTEST_ENTRY_FEE)

@@ -119,6 +119,8 @@ export function clonePersistentBotForMatch(bot: PersistentBot, x: number, y: num
     recentResults: [...bot.recentResults],
     affinities: cloneAffinities(bot.affinities),
     custom: bot.custom,
+    ownerId: bot.ownerId,
+    ownerName: bot.ownerName,
     tacticalInstruction: bot.tacticalInstruction,
     doctrineSummary: bot.doctrineSummary,
     inventory: { weapon: null, armor: null, tool: null },

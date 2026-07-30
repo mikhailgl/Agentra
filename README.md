@@ -37,6 +37,8 @@ The browser still keeps a localStorage cache so the app starts instantly and can
 
 Player sessions are created by the backend with an opaque 256-bit credential. Only its SHA-256 hash is stored in Postgres. Wallet spending, prediction odds and placement, sponsorships, fighter creation/entry, exclusive ownership, doctrine authorization, and post-match settlement are validated server-side with optimistic revision checks. Credits are virtual entertainment currency only; there is no purchase, cash-out, or real-money wagering path.
 
+New players also receive a one-time recovery key. Its hash is stored separately from the browser session, and presenting it rotates the session credential so the same account, wallet, and fighter ownership can move to another browser. Players can choose a public arena name; the backend stamps that identity onto owned fighters, league standings, and match-log story metadata. Exact owned-fighter records, including private doctrine, are available only through the authenticated player roster endpoint.
+
 Supabase row level security is enabled on all public tables. The frontend does not use Supabase keys directly; only the backend uses the server-only service role key. Shared arena snapshots expose public doctrine summaries and decision traces, while exact coaching instructions remain private.
 
 ## Local Development

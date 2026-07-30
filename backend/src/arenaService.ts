@@ -113,6 +113,11 @@ export class ArenaService {
     };
   }
 
+  getOwnedBots(botIds: string[]): PersistentBot[] {
+    const ownedIds = new Set(botIds);
+    return cloneJson(this.persistentBots.filter((bot) => bot.custom && ownedIds.has(bot.id)));
+  }
+
   getCheckpoint(): ArenaCheckpoint {
     return {
       version: 3,
@@ -194,6 +199,25 @@ export class ArenaService {
 
     this.persistentBots[index] = applyPersistentBotDoctrine(this.persistentBots[index], instruction);
     this.requestCheckpoint("bot doctrine updated");
+    return this.getSnapshot({ includeRoster: true });
+  }
+
+  updateOwnerName(ownerId: string, ownerName: string): ArenaSnapshot {
+    for (const bot of this.persistentBots) {
+      if (bot.ownerId === ownerId) bot.ownerName = ownerName;
+    }
+    for (const bot of this.match.bots) {
+      if (bot.ownerId === ownerId) bot.ownerName = ownerName;
+    }
+    this.leagueState = {
+      ...this.leagueState,
+      standings: this.leagueState.standings.map((standing) =>
+        this.persistentBots.find((bot) => bot.id === standing.botId)?.ownerId === ownerId
+          ? { ...standing, ownerName }
+          : standing,
+      ),
+    };
+    this.requestCheckpoint("owner name updated");
     return this.getSnapshot({ includeRoster: true });
   }
 
@@ -466,6 +490,8 @@ function normalizeCustomBot(value: unknown): PersistentBot | null {
     recentResults: ["Released into the arena."],
     affinities: normalizeAffinities(input.affinities as Partial<BotAffinities> | undefined),
     custom: true,
+    ownerId: typeof input.ownerId === "string" && /^[0-9a-f-]{36}$/i.test(input.ownerId) ? input.ownerId : undefined,
+    ownerName: typeof input.ownerName === "string" ? input.ownerName.trim().slice(0, 24) : undefined,
     tacticalInstruction,
     doctrineSummary: summarizeDoctrine(tacticalInstruction),
     journal: [

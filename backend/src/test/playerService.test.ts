@@ -14,10 +14,30 @@ class MemoryPlayerStore implements PlayerAccountStore {
     return clone([...this.accounts.values()].find((account) => account.tokenHash === tokenHash) ?? null);
   }
 
-  async create(id: string, tokenHash: string, state: PlayerState): Promise<StoredPlayerAccount> {
-    const account = { id, tokenHash, state: clone(state), revision: 1 };
+  async findByRecoveryTokenHash(tokenHash: string): Promise<StoredPlayerAccount | null> {
+    return clone([...this.accounts.values()].find((account) => account.recoveryTokenHash === tokenHash) ?? null);
+  }
+
+  async create(id: string, tokenHash: string, recoveryTokenHash: string, state: PlayerState): Promise<StoredPlayerAccount> {
+    const account = { id, tokenHash, recoveryTokenHash, state: clone(state), revision: 1 };
     this.accounts.set(id, account);
     return clone(account);
+  }
+
+  async rotateSessionToken(id: string, tokenHash: string): Promise<StoredPlayerAccount> {
+    const account = this.accounts.get(id);
+    if (!account) throw new Error("Missing account");
+    const updated = { ...account, tokenHash };
+    this.accounts.set(id, updated);
+    return clone(updated);
+  }
+
+  async rotateRecoveryToken(id: string, recoveryTokenHash: string): Promise<StoredPlayerAccount> {
+    const account = this.accounts.get(id);
+    if (!account) throw new Error("Missing account");
+    const updated = { ...account, recoveryTokenHash };
+    this.accounts.set(id, updated);
+    return clone(updated);
   }
 
   async save(id: string, state: PlayerState, expectedRevision: number): Promise<StoredPlayerAccount | null> {
@@ -50,12 +70,33 @@ test("opaque sessions restore the same server-authoritative player", async () =>
   const service = new PlayerService(new MemoryPlayerStore());
   const opened = await service.openSession(undefined, { ownedBotIds: ["custom-12345678-legacy"] });
   assert.ok(opened.sessionToken);
+  assert.ok(opened.recoveryCode);
   assert.equal(opened.state.credits, 1_000);
   assert.deepEqual(opened.state.ownedBotIds, ["custom-12345678-legacy"]);
 
   const restored = await service.openSession(opened.sessionToken);
   assert.equal(restored.sessionToken, undefined);
   assert.equal(restored.state.accountId, opened.state.accountId);
+});
+
+test("recovery keys move an account to a new browser and rotate the old session", async () => {
+  const service = new PlayerService(new MemoryPlayerStore());
+  const opened = await service.openSession();
+  assert.ok(opened.sessionToken);
+  assert.ok(opened.recoveryCode);
+  const originalRecoveryCode = opened.recoveryCode;
+  const named = await service.updateAccountName(opened.sessionToken, "Iron Coach");
+  assert.equal(named.accountName, "Iron Coach");
+
+  const recovered = await service.recoverSession(originalRecoveryCode);
+  assert.equal(recovered.state.accountId, opened.state.accountId);
+  assert.equal(recovered.state.accountName, "Iron Coach");
+  await assert.rejects(() => service.getState(opened.sessionToken), InvalidPlayerSessionError);
+  assert.equal((await service.getState(recovered.sessionToken)).accountName, "Iron Coach");
+
+  const replacement = await service.rotateRecoveryCode(recovered.sessionToken);
+  await assert.rejects(() => service.recoverSession(originalRecoveryCode), InvalidPlayerSessionError);
+  assert.ok(replacement.recoveryCode);
 });
 
 test("wallet mutations reject invalid sessions and insufficient funds", async () => {

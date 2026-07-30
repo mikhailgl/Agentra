@@ -18,6 +18,7 @@ export function createMatchLog(matchNumber: number, match: MatchState, endedAt =
       name: bot.name,
       level: bot.level,
       custom: bot.custom,
+      ownerName: bot.ownerName,
       traits: [...bot.traits],
     })),
     botResults: match.bots.map((bot) => ({

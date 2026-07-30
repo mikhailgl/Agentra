@@ -66,6 +66,7 @@ export function applyLeagueMatchResult(state: LeagueState, match: MatchState, en
     standing.lastPlacement = placement;
     standing.name = bot.name;
     standing.custom = bot.custom;
+    standing.ownerName = bot.ownerName;
     standing.form = [formResult, ...standing.form].slice(0, FORM_LIMIT);
     byBotId.set(bot.id, standing);
   }
@@ -141,6 +142,7 @@ function createStanding(bot: PersistentBot): LeagueStanding {
     botId: bot.id,
     name: bot.name,
     custom: bot.custom,
+    ownerName: bot.ownerName,
     rating: 1_000,
     division: "Silver",
     points: 0,
@@ -158,6 +160,7 @@ function createStandingFromBot(bot: Bot): LeagueStanding {
     botId: bot.id,
     name: bot.name,
     custom: bot.custom,
+    ownerName: bot.ownerName,
     rating: 1_000,
     division: "Silver",
     points: 0,

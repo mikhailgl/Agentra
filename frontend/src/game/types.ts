@@ -158,6 +158,8 @@ export type PersistentBot = {
   recentResults: string[];
   affinities: BotAffinities;
   custom?: boolean;
+  ownerId?: string;
+  ownerName?: string;
   tacticalInstruction?: string;
   doctrineSummary?: string;
   journal?: BotJournalEntry[];
@@ -228,6 +230,8 @@ export type Bot = {
   recentResults: string[];
   affinities: BotAffinities;
   custom?: boolean;
+  ownerId?: string;
+  ownerName?: string;
   tacticalInstruction?: string;
   doctrineSummary?: string;
   inventory: Inventory;
@@ -444,6 +448,7 @@ export type LeagueStanding = {
   botId: string;
   name: string;
   custom?: boolean;
+  ownerName?: string;
   rating: number;
   division: "Bronze" | "Silver" | "Gold" | "Diamond";
   points: number;
@@ -497,6 +502,7 @@ export type MatchLogEntrant = {
   name: string;
   level: number;
   custom?: boolean;
+  ownerName?: string;
   traits: string[];
 };
 

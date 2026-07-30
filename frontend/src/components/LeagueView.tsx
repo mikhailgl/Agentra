@@ -79,7 +79,7 @@ export function LeagueView({
                 <strong>{index + 1}</strong>
                 <span className="standing-fighter">
                   <b>{standing.name}</b>
-                  <small>{liveBotIds.has(standing.botId) ? "Live now" : owned.has(standing.botId) ? "Your fighter" : standing.custom ? "Community" : "Arena"}</small>
+                  <small>{liveBotIds.has(standing.botId) ? "Live now" : owned.has(standing.botId) ? "Your fighter" : standing.ownerName ? `by ${standing.ownerName}` : standing.custom ? "Community" : "Arena"}</small>
                 </span>
                 <span className={`division-badge ${standing.division.toLowerCase()}`}>{standing.division}</span>
                 <span>{standing.wins}W / {Math.max(0, standing.matchesPlayed - standing.wins)}L</span>

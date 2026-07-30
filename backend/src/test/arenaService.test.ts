@@ -76,6 +76,17 @@ test("invalid custom bots are rejected", () => {
   assert.equal(service.registerCustomBot({ id: "not-custom", name: "Bad bot" }, true), null);
 });
 
+test("owner identity follows a custom fighter into public roster and league state", () => {
+  const service = new ArenaService();
+  const bot = { ...createCustomBot(), ownerId: "12345678-1234-1234-1234-123456789abc", ownerName: "First Coach" };
+  assert.ok(service.registerCustomBot(bot, false));
+  const renamed = service.updateOwnerName(bot.ownerId, "Legend Keeper");
+  const publicBot = renamed.persistentBots?.find((candidate) => candidate.id === bot.id);
+  const standing = renamed.leagueState.standings.find((candidate) => candidate.botId === bot.id);
+  assert.equal(publicBot?.ownerName, "Legend Keeper");
+  assert.equal(standing?.ownerName, "Legend Keeper");
+});
+
 function createCustomBot(): PersistentBot {
   const base = createDefaultPool()[0];
   return {

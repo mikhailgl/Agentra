@@ -5,7 +5,7 @@ import type { ArenaViewModel } from "../lib/simulation/types";
 const CLIENT_ID_KEY = "ai-battle:client-id:v1";
 const PLAYER_SESSION_TOKEN_KEY = "botarena:player-session:v1";
 let remoteSyncEnabled = false;
-let playerSessionPromise: Promise<PlayerState | null> | null = null;
+let playerSessionPromise: Promise<RemotePlayerSession | null> | null = null;
 
 export type RemoteGameState = {
   persistentBots?: PersistentBot[];
@@ -35,6 +35,11 @@ export type ArenaStreamFrame = {
 export type AuthenticatedArenaAction = {
   snapshot: ArenaSnapshot;
   state: PlayerState;
+};
+
+export type RemotePlayerSession = {
+  state: PlayerState;
+  recoveryCode?: string;
 };
 
 function getApiBaseUrl(): string | null {
@@ -80,7 +85,7 @@ export function enableRemoteGameStateSync(): void {
   remoteSyncEnabled = true;
 }
 
-export function openRemotePlayerSession(): Promise<PlayerState | null> {
+export function openRemotePlayerSession(): Promise<RemotePlayerSession | null> {
   if (!playerSessionPromise) {
     playerSessionPromise = requestRemotePlayerSession().catch((error) => {
       playerSessionPromise = null;
@@ -90,7 +95,7 @@ export function openRemotePlayerSession(): Promise<PlayerState | null> {
   return playerSessionPromise;
 }
 
-async function requestRemotePlayerSession(): Promise<PlayerState | null> {
+async function requestRemotePlayerSession(): Promise<RemotePlayerSession | null> {
   const apiBaseUrl = getApiBaseUrl();
   if (!apiBaseUrl || typeof window === "undefined") return null;
   const response = await fetch(`${apiBaseUrl}/api/player/session`, {
@@ -99,9 +104,44 @@ async function requestRemotePlayerSession(): Promise<PlayerState | null> {
     body: JSON.stringify({ clientId: getGameClientId() }),
   });
   if (!response.ok) throw new Error(await getArenaActionError(response));
-  const body = (await response.json()) as { state: PlayerState; sessionToken?: string };
+  const body = (await response.json()) as { state: PlayerState; sessionToken?: string; recoveryCode?: string };
   if (body.sessionToken) window.localStorage.setItem(PLAYER_SESSION_TOKEN_KEY, body.sessionToken);
+  return { state: body.state, recoveryCode: body.recoveryCode };
+}
+
+export async function recoverRemotePlayer(recoveryCode: string): Promise<PlayerState | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl || typeof window === "undefined") return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/recover`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ recoveryCode }),
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  const body = (await response.json()) as { state: PlayerState; sessionToken: string };
+  window.localStorage.setItem(PLAYER_SESSION_TOKEN_KEY, body.sessionToken);
+  playerSessionPromise = Promise.resolve({ state: body.state });
   return body.state;
+}
+
+export async function rotateRemoteRecoveryCode(): Promise<{ state: PlayerState; recoveryCode: string } | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/recovery-code`, { method: "POST", headers: getPlayerHeaders() });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return (await response.json()) as { state: PlayerState; recoveryCode: string };
+}
+
+export async function updateRemotePlayerName(name: string): Promise<AuthenticatedArenaAction | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player`, {
+    method: "PATCH",
+    headers: getPlayerHeaders(true),
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return (await response.json()) as AuthenticatedArenaAction;
 }
 
 export async function loadRemotePlayer(): Promise<PlayerState | null> {
@@ -110,6 +150,15 @@ export async function loadRemotePlayer(): Promise<PlayerState | null> {
   const response = await fetch(`${apiBaseUrl}/api/player`, { headers: getPlayerHeaders() });
   if (!response.ok) throw new Error(await getArenaActionError(response));
   return ((await response.json()) as { state: PlayerState }).state;
+}
+
+export async function loadRemoteOwnedBots(): Promise<PersistentBot[]> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return [];
+  const response = await fetch(`${apiBaseUrl}/api/player/bots`, { headers: getPlayerHeaders() });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  const body = (await response.json()) as { bots?: PersistentBot[] };
+  return Array.isArray(body.bots) ? body.bots : [];
 }
 
 export async function placeRemoteBet(matchId: string, type: BetType, botId: string, amount: number): Promise<PlayerState | null> {

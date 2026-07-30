@@ -4,6 +4,7 @@ import type { BetType, MatchState, PlayerState } from "../../frontend/src/game/t
 import type { PlayerAccountStore, StoredPlayerAccount } from "./playerAccountRepository.js";
 
 const SESSION_TOKEN_BYTES = 32;
+const RECOVERY_TOKEN_BYTES = 18;
 const MAX_MUTATION_RETRIES = 4;
 
 export class InvalidPlayerSessionError extends Error {
@@ -17,17 +18,18 @@ export class PlayerActionError extends Error {}
 export class PlayerService {
   constructor(private readonly store: PlayerAccountStore) {}
 
-  async openSession(rawToken?: string, bootstrap?: { ownedBotIds?: string[] }): Promise<{ state: PlayerState; sessionToken?: string }> {
+  async openSession(rawToken?: string, bootstrap?: { ownedBotIds?: string[] }): Promise<{ state: PlayerState; sessionToken?: string; recoveryCode?: string }> {
     if (rawToken) {
       const existing = await this.store.findByTokenHash(hashToken(rawToken));
       if (existing) return { state: existing.state };
     }
 
     const sessionToken = randomBytes(SESSION_TOKEN_BYTES).toString("base64url");
+    const recoveryCode = formatRecoveryCode(randomBytes(RECOVERY_TOKEN_BYTES).toString("hex"));
     const accountId = randomUUID();
     const accountName = `Guest ${accountId.slice(0, 5).toUpperCase()}`;
     const state = createDefaultPlayerState(accountId, accountName);
-    let created = await this.store.create(accountId, hashToken(sessionToken), state);
+    let created = await this.store.create(accountId, hashToken(sessionToken), hashToken(normalizeRecoveryCode(recoveryCode)), state);
     const legacyIds = [...new Set(bootstrap?.ownedBotIds?.filter((id) => /^custom-[a-zA-Z0-9_-]{8,80}$/.test(id)) ?? [])].slice(0, 100);
     const claimedIds: string[] = [];
     for (const botId of legacyIds) {
@@ -37,7 +39,32 @@ export class PlayerService {
       const migrated = await this.store.save(accountId, { ...created.state, ownedBotIds: claimedIds }, created.revision);
       if (migrated) created = migrated;
     }
-    return { state: created.state, sessionToken };
+    return { state: created.state, sessionToken, recoveryCode };
+  }
+
+  async recoverSession(rawRecoveryCode: string): Promise<{ state: PlayerState; sessionToken: string }> {
+    const normalized = normalizeRecoveryCode(rawRecoveryCode);
+    if (normalized.length !== RECOVERY_TOKEN_BYTES * 2) throw new InvalidPlayerSessionError();
+    const account = await this.store.findByRecoveryTokenHash(hashToken(normalized));
+    if (!account) throw new InvalidPlayerSessionError();
+    const sessionToken = randomBytes(SESSION_TOKEN_BYTES).toString("base64url");
+    const rotated = await this.store.rotateSessionToken(account.id, hashToken(sessionToken));
+    return { state: rotated.state, sessionToken };
+  }
+
+  async rotateRecoveryCode(rawToken: string | undefined): Promise<{ state: PlayerState; recoveryCode: string }> {
+    const account = await this.requireAccount(rawToken);
+    const recoveryCode = formatRecoveryCode(randomBytes(RECOVERY_TOKEN_BYTES).toString("hex"));
+    const updated = await this.store.rotateRecoveryToken(account.id, hashToken(normalizeRecoveryCode(recoveryCode)));
+    return { state: updated.state, recoveryCode };
+  }
+
+  async updateAccountName(rawToken: string | undefined, rawName: string): Promise<PlayerState> {
+    const name = rawName.trim().replace(/\s+/g, " ").slice(0, 24);
+    if (name.length < 3 || !/^[a-zA-Z0-9][a-zA-Z0-9 _-]+$/.test(name)) {
+      throw new PlayerActionError("Arena name must be 3–24 letters, numbers, spaces, underscores, or dashes");
+    }
+    return this.mutate(rawToken, (state) => ({ ...state, accountName: name }));
   }
 
   async getState(rawToken: string | undefined): Promise<PlayerState> {
@@ -152,4 +179,12 @@ export class PlayerService {
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function normalizeRecoveryCode(code: string): string {
+  return code.toLowerCase().replace(/[^a-f0-9]/g, "");
+}
+
+function formatRecoveryCode(hex: string): string {
+  return hex.match(/.{1,6}/g)?.join("-") ?? hex;
 }

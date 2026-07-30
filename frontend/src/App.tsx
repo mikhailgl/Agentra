@@ -14,15 +14,19 @@ import {
   enableRemoteGameStateSync,
   hasArenaBackend,
   loadArenaSnapshot,
+  loadRemoteOwnedBots,
   loadRemotePlayer,
   loadRemoteGameState,
   openRemotePlayerSession,
   placeRemoteBet,
+  recoverRemotePlayer,
   registerRemoteBot,
+  rotateRemoteRecoveryCode,
   saveRemoteGameState,
   sendRemoteSponsorDrop,
   subscribeToArenaStream,
   updateRemoteBotDoctrine,
+  updateRemotePlayerName,
   type ArenaSnapshot,
 } from "./game/remotePersistence";
 import { loadArenaQueue } from "./game/queue";
@@ -78,6 +82,7 @@ function App() {
   const [sponsorDropPending, setSponsorDropPending] = useState(false);
   const [botMutationPending, setBotMutationPending] = useState(false);
   const [playerSessionReady, setPlayerSessionReady] = useState(() => !hasArenaBackend());
+  const [newRecoveryCode, setNewRecoveryCode] = useState<string | null>(null);
   const playerStateRef = useRef(playerState);
   const [, forceClockSync] = useState(0);
 
@@ -297,6 +302,57 @@ function App() {
       });
   }, [applyArenaSnapshot]);
 
+  const handleUpdateAccountName = useCallback(async (name: string): Promise<boolean> => {
+    setArenaActionError(null);
+    try {
+      const result = await updateRemotePlayerName(name);
+      if (!result) throw new Error("Arena backend is not configured");
+      playerStateRef.current = result.state;
+      savePlayerState(result.state);
+      setPlayerState(result.state);
+      applyArenaSnapshot(result.snapshot);
+      return true;
+    } catch (error) {
+      setArenaActionError(getErrorMessage(error));
+      return false;
+    }
+  }, [applyArenaSnapshot]);
+
+  const handleRecoverAccount = useCallback(async (recoveryCode: string): Promise<boolean> => {
+    setArenaActionError(null);
+    try {
+      const state = await recoverRemotePlayer(recoveryCode);
+      if (!state) throw new Error("Arena backend is not configured");
+      playerStateRef.current = state;
+      savePlayerState(state);
+      setPlayerState(state);
+      setNewRecoveryCode(null);
+      const ownedBots = await loadRemoteOwnedBots();
+      setPersistentBots((current) => {
+        const merged = mergePrivateOwnedBots(current, ownedBots);
+        savePersistentBots(merged);
+        return merged;
+      });
+      return true;
+    } catch (error) {
+      setArenaActionError(getErrorMessage(error));
+      return false;
+    }
+  }, []);
+
+  const handleRotateRecoveryCode = useCallback(async (): Promise<string | null> => {
+    setArenaActionError(null);
+    try {
+      const result = await rotateRemoteRecoveryCode();
+      if (!result) throw new Error("Arena backend is not configured");
+      setNewRecoveryCode(result.recoveryCode);
+      return result.recoveryCode;
+    } catch (error) {
+      setArenaActionError(getErrorMessage(error));
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (cameraMode !== "follow_bot") return;
     if (!selectedBotId) {
@@ -318,7 +374,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    void loadRemoteGameState()
+    const remoteStateHydration = loadRemoteGameState()
       .then((remoteState) => {
         if (cancelled || !remoteState) {
           return;
@@ -351,11 +407,20 @@ function App() {
       });
 
     void openRemotePlayerSession()
-      .then((remotePlayer) => {
-        if (cancelled || !remotePlayer) return;
-        playerStateRef.current = remotePlayer;
-        savePlayerState(remotePlayer);
-        setPlayerState(remotePlayer);
+      .then(async (session) => {
+        if (cancelled || !session) return;
+        playerStateRef.current = session.state;
+        savePlayerState(session.state);
+        setPlayerState(session.state);
+        setNewRecoveryCode(session.recoveryCode ?? null);
+        await remoteStateHydration;
+        const ownedBots = await loadRemoteOwnedBots();
+        if (cancelled) return;
+        setPersistentBots((current) => {
+          const merged = mergePrivateOwnedBots(current, ownedBots);
+          savePersistentBots(merged);
+          return merged;
+        });
       })
       .catch((error) => {
         console.warn("Player session hydration failed", error);
@@ -517,6 +582,10 @@ function App() {
         onCreateBot={handleCreateCustomBot}
         onEnterBot={handleEnterBot}
         onUpdateDoctrine={handleUpdateDoctrine}
+        onUpdateAccountName={handleUpdateAccountName}
+        onRecoverAccount={handleRecoverAccount}
+        onRotateRecoveryCode={handleRotateRecoveryCode}
+        newRecoveryCode={newRecoveryCode}
         mutationPending={botMutationPending || !playerSessionReady}
         actionError={arenaActionError}
       />
@@ -675,4 +744,11 @@ function mergeArenaRoster(serverRoster: PersistentBot[], currentRoster: Persiste
     return local?.tacticalInstruction ? { ...bot, tacticalInstruction: local.tacticalInstruction } : bot;
   });
   return [...localOwnedBots, ...hydratedServerRoster];
+}
+
+function mergePrivateOwnedBots(currentRoster: PersistentBot[], ownedBots: PersistentBot[]): PersistentBot[] {
+  const ownedById = new Map(ownedBots.map((bot) => [bot.id, bot]));
+  const merged = currentRoster.map((bot) => ownedById.get(bot.id) ?? bot);
+  const currentIds = new Set(currentRoster.map((bot) => bot.id));
+  return [...ownedBots.filter((bot) => !currentIds.has(bot.id)), ...merged];
 }
