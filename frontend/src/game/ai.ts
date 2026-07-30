@@ -4,6 +4,7 @@ import { getMatchConfig } from "./matchConfig";
 import { distance, randomPointInCircle } from "./math";
 import { createRng } from "./random";
 import { areAllied, getRelationship } from "./relationships";
+import { getAgentPolicy } from "./agentStrategy";
 import { evaluateSocialDecision, shouldRefuseAttackForTrust } from "./socialAI";
 import { getTraitModifier } from "./traits";
 import type { Bot, Creature, LootItem, MatchState, Point } from "./types";
@@ -117,6 +118,21 @@ function findPreferredEnemy(bot: Bot, match: MatchState): Bot | null {
     return bountyTarget;
   }
 
+  const targetPriority = getAgentPolicy(bot)?.targetPriority;
+  if (targetPriority === "weakest") {
+    return enemies
+      .filter((candidate) => distance(bot, candidate) <= config.ai.visibleEnemyRange * 1.2)
+      .sort((a, b) => a.health - b.health || distance(bot, a) - distance(bot, b))[0] ?? null;
+  }
+  if (targetPriority === "rival") {
+    return enemies
+      .filter((candidate) => distance(bot, candidate) <= config.ai.visibleEnemyRange * 1.2)
+      .sort((a, b) => getRelationship(bot, b.id).resentment - getRelationship(bot, a.id).resentment || distance(bot, a) - distance(bot, b))[0] ?? null;
+  }
+  if (targetPriority === "nearest") {
+    return enemies.sort((a, b) => distance(bot, a) - distance(bot, b))[0] ?? null;
+  }
+
   if (bot.personality === "Hunter") {
     return enemies
       .filter((candidate) => distance(bot, candidate) <= config.ai.visibleEnemyRange * 1.15)
@@ -175,7 +191,9 @@ function shouldFlee(bot: Bot, enemy: Bot, livingCount: number, match: MatchState
   const defensePressure = getInfluenceStrength(bot, "defense");
   const doctrineDefense = instruction.includes("avoid") || instruction.includes("retreat") || instruction.includes("survive") ? 0.18 : 0;
   const doctrineAggression = instruction.includes("attack") || instruction.includes("rush") || instruction.includes("aggressive") ? 0.14 : 0;
-  const fleeBias = 1 + defensePressure * 0.5 + doctrineDefense - aggressionPressure * 0.45 - doctrineAggression;
+  const agentPolicy = getAgentPolicy(bot);
+  const agentBias = agentPolicy ? (agentPolicy.survival - agentPolicy.aggression) * 0.55 : 0;
+  const fleeBias = 1 + defensePressure * 0.5 + doctrineDefense - aggressionPressure * 0.45 - doctrineAggression + agentBias;
 
   if (shouldForceEndgamePressure(bot, livingCount, match)) {
     return false;
@@ -232,6 +250,10 @@ function shouldSeekLoot(bot: Bot, loot: LootItem, match?: MatchState): boolean {
     return true;
   }
 
+  if ((getAgentPolicy(bot)?.loot ?? 0) >= 0.78) {
+    return true;
+  }
+
   if (loot.rarity === "legendary" || loot.rarity === "rare") {
     return true;
   }
@@ -257,6 +279,8 @@ function shouldSeekLoot(bot: Bot, loot: LootItem, match?: MatchState): boolean {
 
 function getChaseRange(bot: Bot, livingCount: number, match: MatchState): number {
   const config = getMatchConfig(match);
+  const agentPolicy = getAgentPolicy(bot);
+  const agentPressure = agentPolicy ? 0.8 + agentPolicy.aggression * 0.55 - agentPolicy.survival * 0.2 : 1;
   const attackBias =
     1 +
     getInfluenceStrength(bot, "aggression") * 0.5 +
@@ -265,12 +289,12 @@ function getChaseRange(bot: Bot, livingCount: number, match: MatchState): number
     (isSuddenDeathActive(match) ? 0.28 : 0);
   const biome = getBiomeAt(bot, match.zones);
   const visibility = 1 + (biome.modifiers.visibility ?? 0) + ((bot.affinities.biomes[biome.id] ?? 1) - 1) * 0.12;
-  if (livingCount <= 2 && bot.inventory.weapon) return config.ai.visibleEnemyRange * 0.95 * attackBias * visibility;
-  if (bot.personality === "Berserker") return config.ai.visibleEnemyRange * 1.35 * attackBias * visibility;
-  if (bot.personality === "Hunter") return config.ai.visibleEnemyRange * 1.2 * attackBias * visibility;
-  if (bot.personality === "Coward") return config.ai.visibleEnemyRange * 0.45 * attackBias * visibility;
-  if (bot.personality === "Survivor") return (livingCount <= 4 ? config.ai.visibleEnemyRange : config.ai.visibleEnemyRange * 0.35) * attackBias * visibility;
-  return config.ai.visibleEnemyRange * attackBias * visibility;
+  if (livingCount <= 2 && bot.inventory.weapon) return config.ai.visibleEnemyRange * 0.95 * attackBias * agentPressure * visibility;
+  if (bot.personality === "Berserker") return config.ai.visibleEnemyRange * 1.35 * attackBias * agentPressure * visibility;
+  if (bot.personality === "Hunter") return config.ai.visibleEnemyRange * 1.2 * attackBias * agentPressure * visibility;
+  if (bot.personality === "Coward") return config.ai.visibleEnemyRange * 0.45 * attackBias * agentPressure * visibility;
+  if (bot.personality === "Survivor") return (livingCount <= 4 ? config.ai.visibleEnemyRange : config.ai.visibleEnemyRange * 0.35) * attackBias * agentPressure * visibility;
+  return config.ai.visibleEnemyRange * attackBias * agentPressure * visibility;
 }
 
 function shouldForceEndgamePressure(bot: Bot, livingCount: number, match: MatchState): boolean {
@@ -291,13 +315,15 @@ function getCreatureThreatRange(bot: Bot): number {
 
 function getLootDesire(bot: Bot, item: LootItem, match?: MatchState): number {
   const dangerPenalty = match && isPointInActiveDangerZone(match, item) ? 0.18 : 1;
+  const agentPolicy = getAgentPolicy(bot);
+  const agentLootBias = agentPolicy ? 0.65 + agentPolicy.loot * 0.7 : 1;
   const rarity = item.rarity === "legendary" ? 5 : item.rarity === "rare" ? 3 : item.rarity === "uncommon" ? 2 : 1;
   const rareEventBonus = item.rarity === "legendary" ? 26 : item.rarity === "rare" ? 12 : 0;
-  if (item.type === "medkit") return (bot.health < 45 ? 8 : bot.health < 75 ? 4 : bot.health < 82 || bot.personality === "Coward" ? 0.8 : 0) * dangerPenalty;
-  if (item.type === "weapon") return (item.weapon.damage * (0.4 + bot.psychology.aggression * 0.35) + rarity + rareEventBonus + ((bot.affinities.weapons[item.weapon.name] ?? 1) - 1) * 4) * dangerPenalty;
-  if (item.type === "armor") return ((item.effects.defense ?? 0) * (60 + bot.psychology.selfPreservation * 30) + rarity + rareEventBonus) * dangerPenalty;
-  if (item.type === "credits") return (item.amount * (0.08 + bot.psychology.opportunism * 0.08) + rarity + rareEventBonus) * dangerPenalty;
-  return (((item.effects.stealth ?? 0) + (item.effects.trapPower ?? 0)) * (45 + bot.psychology.opportunism * 30) + rarity + rareEventBonus) * dangerPenalty;
+  if (item.type === "medkit") return (bot.health < 45 ? 8 : bot.health < 75 ? 4 : bot.health < 82 || bot.personality === "Coward" ? 0.8 : 0) * dangerPenalty * agentLootBias;
+  if (item.type === "weapon") return (item.weapon.damage * (0.4 + bot.psychology.aggression * 0.35) + rarity + rareEventBonus + ((bot.affinities.weapons[item.weapon.name] ?? 1) - 1) * 4) * dangerPenalty * agentLootBias;
+  if (item.type === "armor") return ((item.effects.defense ?? 0) * (60 + bot.psychology.selfPreservation * 30) + rarity + rareEventBonus) * dangerPenalty * agentLootBias;
+  if (item.type === "credits") return (item.amount * (0.08 + bot.psychology.opportunism * 0.08) + rarity + rareEventBonus) * dangerPenalty * agentLootBias;
+  return (((item.effects.stealth ?? 0) + (item.effects.trapPower ?? 0)) * (45 + bot.psychology.opportunism * 30) + rarity + rareEventBonus) * dangerPenalty * agentLootBias;
 }
 
 function hashSeed(input: string): number {

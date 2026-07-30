@@ -13,6 +13,7 @@ import { addCustomPersistentBot, loadPersistentBots, removeCustomPersistentBot, 
 import {
   enableRemoteGameStateSync,
   hasArenaBackend,
+  issueRemoteCreatorApiKey,
   loadArenaSnapshot,
   loadRemoteOwnedBots,
   loadRemotePlayer,
@@ -90,6 +91,7 @@ function App() {
   const [botMutationPending, setBotMutationPending] = useState(false);
   const [playerSessionReady, setPlayerSessionReady] = useState(() => !hasArenaBackend());
   const [newRecoveryCode, setNewRecoveryCode] = useState<string | null>(null);
+  const [newCreatorApiKey, setNewCreatorApiKey] = useState<string | null>(null);
   const playerStateRef = useRef(playerState);
   const [, forceClockSync] = useState(0);
 
@@ -334,6 +336,7 @@ function App() {
       savePlayerState(state);
       setPlayerState(state);
       setNewRecoveryCode(null);
+      setNewCreatorApiKey(null);
       const ownedBots = await loadRemoteOwnedBots();
       setPersistentBots((current) => {
         const merged = mergePrivateOwnedBots(current, ownedBots);
@@ -354,6 +357,19 @@ function App() {
       if (!result) throw new Error("Arena backend is not configured");
       setNewRecoveryCode(result.recoveryCode);
       return result.recoveryCode;
+    } catch (error) {
+      setArenaActionError(getErrorMessage(error));
+      return null;
+    }
+  }, []);
+
+  const handleIssueCreatorApiKey = useCallback(async (): Promise<string | null> => {
+    setArenaActionError(null);
+    try {
+      const apiKey = await issueRemoteCreatorApiKey();
+      if (!apiKey) throw new Error("Arena backend is not configured");
+      setNewCreatorApiKey(apiKey);
+      return apiKey;
     } catch (error) {
       setArenaActionError(getErrorMessage(error));
       return null;
@@ -608,7 +624,9 @@ function App() {
         onUpdateAccountName={handleUpdateAccountName}
         onRecoverAccount={handleRecoverAccount}
         onRotateRecoveryCode={handleRotateRecoveryCode}
+        onIssueCreatorApiKey={handleIssueCreatorApiKey}
         newRecoveryCode={newRecoveryCode}
+        newCreatorApiKey={newCreatorApiKey}
         mutationPending={botMutationPending || !playerSessionReady}
         actionError={arenaActionError}
       />

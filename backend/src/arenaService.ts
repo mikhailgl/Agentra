@@ -202,6 +202,27 @@ export class ArenaService {
     return this.getSnapshot({ includeRoster: true });
   }
 
+  updateBotAgentStrategy(botId: string, strategy: PersistentBot["agentStrategy"]): ArenaSnapshot | null {
+    const index = this.persistentBots.findIndex((bot) => bot.id === botId && bot.custom);
+    if (index === -1 || !strategy) return null;
+    this.persistentBots[index] = {
+      ...this.persistentBots[index],
+      agentStrategy: strategy,
+      journal: [
+        {
+          id: `journal-${Date.now()}-${botId}-agent-${strategy.id}`,
+          timestamp: Date.now(),
+          title: `Strategy linked: ${strategy.name}`,
+          body: `${strategy.authorName}'s ${strategy.runtime} policy will shape future autonomous decisions.`,
+          tone: "training" as const,
+        },
+        ...(this.persistentBots[index].journal ?? []),
+      ].slice(0, 24),
+    };
+    this.requestCheckpoint("agent strategy attached");
+    return this.getSnapshot({ includeRoster: true });
+  }
+
   updateOwnerName(ownerId: string, ownerName: string): ArenaSnapshot {
     for (const bot of this.persistentBots) {
       if (bot.ownerId === ownerId) bot.ownerName = ownerName;

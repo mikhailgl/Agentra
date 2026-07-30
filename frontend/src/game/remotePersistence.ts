@@ -132,6 +132,14 @@ export async function rotateRemoteRecoveryCode(): Promise<{ state: PlayerState; 
   return (await response.json()) as { state: PlayerState; recoveryCode: string };
 }
 
+export async function issueRemoteCreatorApiKey(): Promise<string | null> {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) return null;
+  const response = await fetch(`${apiBaseUrl}/api/player/creator-api-key`, { method: "POST", headers: getPlayerHeaders() });
+  if (!response.ok) throw new Error(await getArenaActionError(response));
+  return ((await response.json()) as { apiKey: string }).apiKey;
+}
+
 export async function updateRemotePlayerName(name: string): Promise<AuthenticatedArenaAction | null> {
   const apiBaseUrl = getApiBaseUrl();
   if (!apiBaseUrl) return null;

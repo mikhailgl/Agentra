@@ -8,6 +8,7 @@ The repo is a small npm workspace monorepo:
 
 - `frontend/` contains the Vite React client, Three.js arena UI, and client-safe simulation code.
 - `backend/` contains the Express API, CORS configuration, health check, and Supabase service-role access.
+- `sdk/` contains the zero-dependency constrained agent client and TypeScript contract.
 - `supabase/migrations/` contains the Postgres schema used for durable state.
 
 Durable persistence lives in Supabase Postgres:
@@ -20,6 +21,9 @@ Durable persistence lives in Supabase Postgres:
 - `arena_queues` stores queued bot ids.
 - `match_results` stores recent match summaries.
 - `match_logs` stores full completed-match timelines, highlights, entrants, and result stats for video/script generation.
+- `creator_api_keys` stores only SHA-256 hashes of rotatable creator credentials.
+- `agent_strategies` stores immutable, versioned declarative policies; arbitrary submitted code never runs in the arena.
+- `generated_media` indexes public match cuts stored in the `match-media` Storage bucket.
 
 ## Persistent League
 
@@ -50,6 +54,17 @@ Player sessions are created by the backend with an opaque 256-bit credential. On
 New players also receive a one-time recovery key. Its hash is stored separately from the browser session, and presenting it rotates the session credential so the same account, wallet, and fighter ownership can move to another browser. Players can choose a public arena name; the backend stamps that identity onto owned fighters, league standings, and match-log story metadata. Exact owned-fighter records, including private doctrine, are available only through the authenticated player roster endpoint.
 
 Supabase row level security is enabled on all public tables. The frontend does not use Supabase keys directly; only the backend uses the server-only service role key. Shared arena snapshots expose public doctrine summaries and decision traces, while exact coaching instructions remain private.
+
+## Creator Agent API
+
+Fighter owners can create a one-time creator credential in **Bots → Account → Creator API** and use the [`@botarena/agent-sdk`](./sdk/README.md) to submit strategies. The v1 runtime is intentionally declarative: creators set five bounded policy axes and one target priority. The canonical server combines those inputs with personality, doctrine, relationships, equipment, arena hazards, and learned affinities; creators cannot upload executable code, call back into a remote model during a tick, or directly command an action.
+
+- `GET /api/agent/v1/spec` publishes the current contract and limits.
+- `GET /api/agent/v1/strategies` lists public versioned strategies.
+- `POST /api/agent/v1/strategies` validates and publishes a strategy using a creator Bearer key.
+- `PUT /api/agent/v1/fighters/:fighterId/strategy/:strategyId` links an owned strategy to an owned fighter.
+
+Reissuing a creator key revokes the previous one. Strategy versions are immutable, public, and attributed to the player's arena name, while attached fighters retain the exact version that shaped their decisions.
 
 ## Local Development
 

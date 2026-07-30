@@ -145,6 +145,30 @@ export type Relationship = {
   alliance?: AllianceData;
 };
 
+export type AgentTargetPriority = "nearest" | "weakest" | "rival" | "bounty";
+
+export type AgentPolicy = {
+  aggression: number;
+  survival: number;
+  loot: number;
+  social: number;
+  vengeance: number;
+  targetPriority: AgentTargetPriority;
+};
+
+export type AgentStrategy = {
+  id: string;
+  schemaVersion: 1;
+  runtime: "declarative-v1";
+  slug: string;
+  name: string;
+  description: string;
+  version: number;
+  authorName: string;
+  policy: AgentPolicy;
+  createdAt: number;
+};
+
 export type PersistentBot = {
   id: string;
   name: string;
@@ -162,6 +186,7 @@ export type PersistentBot = {
   ownerName?: string;
   tacticalInstruction?: string;
   doctrineSummary?: string;
+  agentStrategy?: AgentStrategy;
   journal?: BotJournalEntry[];
 };
 
@@ -234,6 +259,7 @@ export type Bot = {
   ownerName?: string;
   tacticalInstruction?: string;
   doctrineSummary?: string;
+  agentStrategy?: AgentStrategy;
   inventory: Inventory;
   behavior: BehaviorState;
   lastAttackAt: number;

@@ -5,7 +5,8 @@
   },
   "workspaces": [
     "frontend",
-    "backend"
+    "backend",
+    "sdk"
   ],
   "scripts": {
     "dev": "npm run dev --workspace frontend",

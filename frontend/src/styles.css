@@ -2021,7 +2021,7 @@ textarea {
   padding: 0.7rem;
 }
 
-.recovery-section code {
+.account-section code {
   background: #080d0a;
   border: 1px solid rgba(242, 196, 83, 0.25);
   border-radius: 8px;
@@ -2031,9 +2031,11 @@ textarea {
   overflow-wrap: anywhere;
   padding: 0.85rem;
   user-select: all;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
-.recovery-section strong {
+.account-section strong {
   color: #dce8df;
   font-size: 0.78rem;
   line-height: 1.45;
@@ -2632,6 +2634,44 @@ textarea {
   display: grid;
   gap: 0.16rem;
   padding: 0.75rem;
+}
+
+.agent-strategy-card {
+  background: linear-gradient(145deg, rgba(34, 74, 92, 0.5), rgba(18, 29, 23, 0.92));
+  border: 1px solid rgba(125, 211, 252, 0.32);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+}
+
+.agent-strategy-card > span,
+.agent-strategy-card small {
+  color: #9edcf2;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.agent-strategy-card > strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
+.agent-strategy-card > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.agent-strategy-card > div span {
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 999px;
+  color: #dbeafe;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.24rem 0.42rem;
+  text-transform: capitalize;
 }
 
 .spectator-top,

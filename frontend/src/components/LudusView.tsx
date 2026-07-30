@@ -35,7 +35,9 @@ export function LudusView({
   onUpdateAccountName,
   onRecoverAccount,
   onRotateRecoveryCode,
+  onIssueCreatorApiKey,
   newRecoveryCode,
+  newCreatorApiKey,
   mutationPending,
   actionError,
 }: {
@@ -53,7 +55,9 @@ export function LudusView({
   onUpdateAccountName: (name: string) => Promise<boolean>;
   onRecoverAccount: (recoveryCode: string) => Promise<boolean>;
   onRotateRecoveryCode: () => Promise<string | null>;
+  onIssueCreatorApiKey: () => Promise<string | null>;
   newRecoveryCode: string | null;
+  newCreatorApiKey: string | null;
   mutationPending: boolean;
   actionError: string | null;
 }) {
@@ -186,6 +190,8 @@ export function LudusView({
           onUpdateName={onUpdateAccountName}
           onRecover={onRecoverAccount}
           onRotateRecoveryCode={onRotateRecoveryCode}
+          onIssueCreatorApiKey={onIssueCreatorApiKey}
+          creatorApiKey={newCreatorApiKey}
         />
       )}
     </main>
@@ -199,6 +205,8 @@ function AccountPanel({
   onUpdateName,
   onRecover,
   onRotateRecoveryCode,
+  onIssueCreatorApiKey,
+  creatorApiKey,
 }: {
   player: PlayerState;
   recoveryCode: string | null;
@@ -206,10 +214,13 @@ function AccountPanel({
   onUpdateName: (name: string) => Promise<boolean>;
   onRecover: (recoveryCode: string) => Promise<boolean>;
   onRotateRecoveryCode: () => Promise<string | null>;
+  onIssueCreatorApiKey: () => Promise<string | null>;
+  creatorApiKey: string | null;
 }) {
   const [name, setName] = useState(player.accountName);
   const [recoveryDraft, setRecoveryDraft] = useState("");
   const [visibleRecoveryCode, setVisibleRecoveryCode] = useState(recoveryCode);
+  const [visibleCreatorApiKey, setVisibleCreatorApiKey] = useState(creatorApiKey);
   const [pending, setPending] = useState(false);
 
   const saveName = async () => {
@@ -232,6 +243,12 @@ function AccountPanel({
     setPending(false);
   };
 
+  const issueCreatorKey = async () => {
+    setPending(true);
+    setVisibleCreatorApiKey(await onIssueCreatorApiKey());
+    setPending(false);
+  };
+
   return (
     <div className="modal-backdrop account-backdrop" role="presentation">
       <section className="account-panel" role="dialog" aria-modal="true" aria-labelledby="account-title">
@@ -239,6 +256,21 @@ function AccountPanel({
           <div><span>Player identity</span><h2 id="account-title">Your arena account</h2></div>
           <button type="button" className="secondary-button" onClick={onClose}>Close</button>
         </header>
+
+        <div className="account-section">
+          <span>Creator API</span>
+          <p>Submit versioned declarative strategies through the constrained SDK. Submitted code never runs inside the arena.</p>
+          {visibleCreatorApiKey && (
+            <>
+              <code>{visibleCreatorApiKey}</code>
+              <strong>Copy this key now. Creating another key immediately revokes it.</strong>
+            </>
+          )}
+          <button type="button" className="secondary-button" onClick={() => void issueCreatorKey()} disabled={pending}>
+            {visibleCreatorApiKey ? "Rotate creator key" : "Create creator key"}
+          </button>
+          <small>Use it as a Bearer token with `/api/agent/v1`. Never put it in browser code or a public repository.</small>
+        </div>
 
         <div className="account-section">
           <label htmlFor="arena-name">Public arena name</label>
@@ -426,6 +458,15 @@ function DoctrineTab({ bot, canCoach, onUpdateDoctrine, pending }: { bot: Persis
         <span>Current read</span>
         <strong>{bot.doctrineSummary ?? "Autonomous instincts"}</strong>
       </div>
+      {bot.agentStrategy && (
+        <div className="agent-strategy-card">
+          <span>External strategy · v{bot.agentStrategy.version}</span>
+          <strong>{bot.agentStrategy.name}</strong>
+          <p>{bot.agentStrategy.description}</p>
+          <small>by {bot.agentStrategy.authorName} · {bot.agentStrategy.runtime} · targets {bot.agentStrategy.policy.targetPriority}</small>
+          <div>{Object.entries(bot.agentStrategy.policy).filter((entry): entry is [string, number] => typeof entry[1] === "number").map(([key, value]) => <span key={key}>{key} {Math.round(value * 100)}</span>)}</div>
+        </div>
+      )}
       <button type="button" disabled={pending || disabled || draft.trim() === (bot.tacticalInstruction ?? "")} onClick={() => onUpdateDoctrine(bot.id, draft)}>
         {pending ? "Saving..." : "Save doctrine"}
       </button>

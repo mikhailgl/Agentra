@@ -1,0 +1,18 @@
+{
+  "name": "@botarena/agent-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit --allowJs --checkJs --module nodenext --moduleResolution nodenext --target es2022 index.mjs"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

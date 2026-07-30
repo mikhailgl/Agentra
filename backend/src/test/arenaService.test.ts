@@ -87,6 +87,27 @@ test("owner identity follows a custom fighter into public roster and league stat
   assert.equal(standing?.ownerName, "Legend Keeper");
 });
 
+test("a versioned external strategy becomes public fighter identity and persists in checkpoints", () => {
+  const service = new ArenaService();
+  const bot = { ...createCustomBot(), ownerId: "12345678-1234-1234-1234-123456789abc", ownerName: "Circuit Sage" };
+  assert.ok(service.registerCustomBot(bot, false));
+  const strategy = {
+    id: "12345678-1234-1234-1234-123456789def",
+    schemaVersion: 1 as const,
+    runtime: "declarative-v1" as const,
+    slug: "patient-hunter",
+    name: "Patient Hunter",
+    description: "Collect gear, preserve health, and pressure the weakest visible rival.",
+    version: 2,
+    authorName: "Circuit Sage",
+    policy: { aggression: 0.72, survival: 0.65, loot: 0.8, social: 0.25, vengeance: 0.4, targetPriority: "weakest" as const },
+    createdAt: 10_000,
+  };
+  const snapshot = service.updateBotAgentStrategy(bot.id, strategy);
+  assert.equal(snapshot?.persistentBots?.find((candidate) => candidate.id === bot.id)?.agentStrategy?.id, strategy.id);
+  assert.equal(service.getCheckpoint().persistentBots?.find((candidate) => candidate.id === bot.id)?.agentStrategy?.version, 2);
+});
+
 function createCustomBot(): PersistentBot {
   const base = createDefaultPool()[0];
   return {

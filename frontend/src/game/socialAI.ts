@@ -2,6 +2,7 @@ import { getMatchConfig } from "./matchConfig";
 import { distance } from "./math";
 import { areAllied, getActiveAlly, getPerceptionRange, getRelationship } from "./relationships";
 import { getTraitModifier } from "./traits";
+import { getAgentPolicy } from "./agentStrategy";
 import type { Bot, MatchState } from "./types";
 
 export type SocialDecision =
@@ -87,6 +88,7 @@ function scoreTarget(bot: Bot, target: Bot, match: MatchState) {
   const targetStrength = estimateBotStrength(target);
   const relative = targetStrength / Math.max(1, strength);
   const allied = areAllied(bot, target, match.elapsedMs);
+  const policy = getAgentPolicy(bot);
 
   if (allied) {
     return {
@@ -103,22 +105,26 @@ function scoreTarget(bot: Bot, target: Bot, match: MatchState) {
       bot.psychology.vengefulness * relationship.resentment * 0.36 +
       (1 - relationship.trust) * 0.13 +
       (relative < 0.8 ? bot.psychology.opportunism * 0.18 : 0) +
-      getTraitModifier(bot, "strengthBonus"),
+      getTraitModifier(bot, "strengthBonus") +
+      (policy ? (policy.aggression - 0.5) * 0.24 + policy.vengeance * relationship.resentment * 0.16 : 0),
     avoid:
       bot.psychology.selfPreservation * 0.3 +
       relationship.fear * 0.33 +
       (relative > 1.15 ? (1 - bot.psychology.riskTolerance) * 0.22 : 0) +
-      getTraitModifier(bot, "fleeBonus"),
+      getTraitModifier(bot, "fleeBonus") +
+      (policy ? (policy.survival - 0.5) * 0.22 : 0),
     follow:
       relationship.respect * 0.36 +
       bot.psychology.ambition * (relative >= 1 ? 0.18 : 0) +
-      bot.psychology.sociability * 0.14,
+      bot.psychology.sociability * 0.14 +
+      (policy ? (policy.social - 0.5) * 0.18 : 0),
     alliance:
       bot.psychology.sociability * 0.28 +
       relationship.trust * 0.25 +
       relationship.respect * 0.16 +
       bot.psychology.ambition * (relative >= 0.9 ? 0.16 : 0) -
-      relationship.resentment * 0.24,
+      relationship.resentment * 0.24 +
+      (policy ? (policy.social - 0.5) * 0.2 : 0),
   };
 }
 
@@ -126,6 +132,7 @@ function scoreBetrayal(bot: Bot, ally: Bot): number {
   const relationship = getRelationship(bot, ally.id);
   const allyWeak = estimateBotStrength(ally) < estimateBotStrength(bot) * 0.72 ? 0.18 : 0;
   const lootValue = ally.inventory.weapon ? ally.inventory.weapon.damage / 100 : 0;
+  const policy = getAgentPolicy(bot);
   return (
     bot.psychology.opportunism * 0.35 +
     bot.psychology.ambition * 0.16 +
@@ -133,7 +140,8 @@ function scoreBetrayal(bot: Bot, ally: Bot): number {
     lootValue +
     allyWeak -
     bot.psychology.loyalty * 0.34 -
-    relationship.trust * 0.22
+    relationship.trust * 0.22 +
+    (policy ? (policy.vengeance - policy.social) * 0.16 : 0)
   );
 }
 

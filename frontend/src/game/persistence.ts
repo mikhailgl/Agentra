@@ -123,6 +123,7 @@ export function clonePersistentBotForMatch(bot: PersistentBot, x: number, y: num
     ownerName: bot.ownerName,
     tacticalInstruction: bot.tacticalInstruction,
     doctrineSummary: bot.doctrineSummary,
+    agentStrategy: bot.agentStrategy,
     inventory: { weapon: null, armor: null, tool: null },
     behavior: "seeking_loot",
     lastAttackAt: -Infinity,
@@ -270,6 +271,7 @@ function normalizePersistentBot(bot: PersistentBot): PersistentBot {
     custom: bot.custom ?? false,
     tacticalInstruction: bot.tacticalInstruction,
     doctrineSummary: bot.doctrineSummary ?? summarizeDoctrine(bot.tacticalInstruction ?? ""),
+    agentStrategy: bot.agentStrategy,
     journal: normalizeJournal(bot.journal, bot),
   };
 }

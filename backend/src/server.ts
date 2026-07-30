@@ -3,6 +3,8 @@ import cors from "cors";
 import express from "express";
 import { ArenaCheckpointRepository } from "./arenaCheckpointRepository.js";
 import { ArenaService, type ArenaCheckpoint } from "./arenaService.js";
+import { CreatorApiRepository } from "./creatorApiRepository.js";
+import { CreatorApiService } from "./creatorApiService.js";
 import { getConfig } from "./config.js";
 import { GameStateRepository } from "./gameStateRepository.js";
 import { GeneratedMediaRepository } from "./generatedMediaRepository.js";
@@ -28,6 +30,7 @@ const arenaCheckpointRepository = new ArenaCheckpointRepository(supabase);
 const matchLogRepository = new MatchLogRepository(supabase);
 const generatedMediaRepository = new GeneratedMediaRepository(supabase);
 const playerService = new PlayerService(new PlayerAccountRepository(supabase));
+const creatorApiService = new CreatorApiService(new CreatorApiRepository(supabase));
 const arena = new ArenaService({
   onCheckpointNeeded: saveArenaCheckpoint,
   onMatchLogReady: saveMatchLog,
@@ -194,6 +197,26 @@ app.get("/api/media", async (request, response, next) => {
   }
 });
 
+app.get("/api/agent/v1/spec", (_request, response) => {
+  response.json({
+    schemaVersion: 1,
+    runtime: "declarative-v1",
+    execution: "server-side deterministic policy; no submitted code or remote callbacks",
+    targetPriorities: ["nearest", "weakest", "rival", "bounty"],
+    policyAxes: ["aggression", "survival", "loot", "social", "vengeance"],
+    policyRange: { minimum: 0, maximum: 1 },
+    limits: { slug: 40, name: 48, description: 240 },
+  });
+});
+
+app.get("/api/agent/v1/strategies", async (request, response, next) => {
+  try {
+    response.json({ strategies: await creatorApiService.listStrategies(Number(request.query.limit ?? 50)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/fantasy/leaderboard", requireArenaReady, async (request, response, next) => {
   try {
     const seasonId = arena.getSnapshot().leagueState.seasonId;
@@ -275,6 +298,34 @@ app.post("/api/player/recover", async (request, response, next) => {
 app.post("/api/player/recovery-code", async (request, response, next) => {
   try {
     response.json(await playerService.rotateRecoveryCode(getSessionToken(request)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/player/creator-api-key", async (request, response, next) => {
+  try {
+    const state = await playerService.getState(getSessionToken(request));
+    response.status(201).json({ apiKey: await creatorApiService.issueApiKey(state.accountId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/agent/v1/strategies", async (request, response, next) => {
+  try {
+    response.status(201).json({ strategy: await creatorApiService.submitStrategy(getSessionToken(request), request.body) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/agent/v1/fighters/:botId/strategy/:strategyId", requireArenaReady, async (request, response, next) => {
+  try {
+    const strategy = await creatorApiService.requireOwnedStrategy(getSessionToken(request), request.params.botId, request.params.strategyId);
+    const snapshot = arena.updateBotAgentStrategy(request.params.botId, strategy);
+    if (!snapshot) throw new PlayerActionError("Custom fighter not found");
+    response.json({ fighterId: request.params.botId, strategy, snapshot });
   } catch (error) {
     next(error);
   }
