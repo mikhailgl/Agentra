@@ -108,7 +108,9 @@ export class PlayerAccountRepository implements PlayerAccountStore {
     const pendingRequest = this.supabase
       .from("player_accounts")
       .select("id, session_token_hash, recovery_token_hash, state, revision")
-      .contains("state->bets", [{ matchId, status: "pending" }]);
+      // postgrest-js treats a JavaScript array as a PostgreSQL array. This
+      // path points into JSONB, so serialize the JSON array explicitly.
+      .contains("state->bets", JSON.stringify([{ matchId, status: "pending" }]));
     const [pendingResponse, ownerAccountResponse] = await Promise.all([
       pendingRequest,
       ownerId
