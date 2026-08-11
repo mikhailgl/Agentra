@@ -4,8 +4,7 @@ import * as THREE from "three";
 import type { ArenaBotView } from "../../lib/simulation/types";
 import { FloatingNameplate } from "./FloatingNameplate";
 import { HealthBar3D } from "./HealthBar3D";
-
-const tmpPosition = new THREE.Vector3();
+import { useBufferedTransform } from "./useBufferedTransform";
 
 export function BotAvatar({
   bot,
@@ -14,7 +13,7 @@ export function BotAvatar({
   bot: ArenaBotView;
   onSelect: (botId: string) => void;
 }) {
-  const groupRef = useRef<THREE.Group>(null);
+  const { groupRef, initialPosition } = useBufferedTransform(bot.position, bot.rotationY);
   const bodyRef = useRef<THREE.Mesh>(null);
   const lowHealth = bot.health <= 28 && bot.alive;
   const status = bot.isWinner
@@ -30,18 +29,13 @@ export function BotAvatar({
             : undefined;
 
   useFrame((_, delta) => {
-    const group = groupRef.current;
-    if (!group) return;
-    tmpPosition.set(...bot.position);
-    group.position.lerp(tmpPosition, Math.min(1, delta * 9));
-    group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, bot.rotationY, Math.min(1, delta * 8));
     if (bodyRef.current) {
       bodyRef.current.rotation.z = bot.alive ? 0 : THREE.MathUtils.lerp(bodyRef.current.rotation.z, Math.PI / 2, Math.min(1, delta * 6));
     }
   });
 
   return (
-    <group ref={groupRef} position={bot.position} onClick={(event) => {
+    <group ref={groupRef} position={initialPosition} onClick={(event) => {
       event.stopPropagation();
       onSelect(bot.id);
     }}>

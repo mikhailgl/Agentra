@@ -12,8 +12,8 @@ export function clamp(value: number, min: number, max: number): number {
 
 export function clampToMap(point: Point, config: MatchConfig = DEFAULT_MATCH_CONFIG): Point {
   return {
-    x: clamp(point.x, 0, config.arena.size),
-    y: clamp(point.y, 0, config.arena.size),
+    x: clamp(point.x, config.arena.edgePadding, config.arena.size - config.arena.edgePadding),
+    y: clamp(point.y, config.arena.edgePadding, config.arena.size - config.arena.edgePadding),
   };
 }
 
@@ -33,9 +33,19 @@ export function moveToward(from: Point, to: Point, maxDistance: number, config: 
 }
 
 export function moveAway(from: Point, threat: Point, maxDistance: number, config: MatchConfig = DEFAULT_MATCH_CONFIG): Point {
-  const dx = from.x - threat.x;
-  const dy = from.y - threat.y;
-  const length = Math.hypot(dx, dy) || 1;
+  let dx = from.x - threat.x;
+  let dy = from.y - threat.y;
+  let length = Math.hypot(dx, dy);
+
+  // Coincident fighters previously had no escape vector and could remain
+  // stacked on an arena corner forever. Pull them inward; differing movement
+  // speeds then separate them on the first simulation step.
+  if (length < 0.001) {
+    const center = config.arena.size / 2;
+    dx = center - from.x;
+    dy = center - from.y;
+    length = Math.hypot(dx, dy) || 1;
+  }
 
   return clampToMap({
     x: from.x + (dx / length) * maxDistance,

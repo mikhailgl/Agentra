@@ -44,6 +44,7 @@ export const DEFAULT_MATCH_CONFIG: MatchConfig = {
     winnersRemaining: 1,
     finalPhaseBotCount: 3,
     maxVisibleEvents: 18,
+    maxDurationMs: 600_000,
   },
   ai: {
     visibleEnemyRange: 360,

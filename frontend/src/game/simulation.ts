@@ -175,7 +175,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
         y: decision.target.y,
         label: "Betrayal",
       });
-      tryAttack(match, bot, decision.target, true);
+      applyBotAttack(match, bot, decision.target, true);
     }
 
     if (decision.action === "refuse_attack") {
@@ -190,7 +190,7 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
     }
 
     if (decision.action === "attack") {
-      tryAttack(match, bot, decision.target);
+      applyBotAttack(match, bot, decision.target);
     }
 
     if (decision.action === "attack_creature") {
@@ -201,6 +201,32 @@ export function stepSimulation(match: MatchState, deltaMs: number): MatchState {
   }
 
   updateCreatures(match);
+  finishOvertimeMatch(match);
+  finishIfNeeded(match);
+  return match;
+}
+
+export function stepAutonomousSimulation(match: MatchState, deltaMs: number): MatchState {
+  if (match.ended) {
+    return match;
+  }
+
+  ensureRuntimeMatchEventFields(match);
+  match.elapsedMs += deltaMs;
+  expireAlliances(match, addEvent.bind(null, match));
+  updateArenaEventSystem(match, deltaMs, addEvent.bind(null, match));
+
+  for (const bot of match.bots) {
+    ensureRuntimeBotFields(bot);
+    // Autonomous mode never accepts the legacy player influence mechanism.
+    bot.activeInfluences = [];
+    if (!bot.alive) continue;
+    updateBotBiome(match, bot, deltaMs);
+    bot.survivalTimeMs = match.elapsedMs;
+  }
+
+  updateCreatures(match);
+  finishOvertimeMatch(match);
   finishIfNeeded(match);
   return match;
 }
@@ -310,15 +336,15 @@ function createSponsorItem(match: MatchState, x: number, y: number, kind: Sponso
   return createLegacyWeaponLoot(`sponsor-${match.nextEventId}-${kind.toLowerCase()}`, x, y, kind);
 }
 
-function tryAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = false): void {
+export function applyBotAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = false): boolean {
   const weapon = attacker.inventory.weapon;
 
   if (!weapon || !target.alive) {
-    return;
+    return false;
   }
 
   if (match.elapsedMs - attacker.lastAttackAt < weapon.cooldownMs) {
-    return;
+    return false;
   }
 
   attacker.lastAttackAt = match.elapsedMs;
@@ -341,7 +367,7 @@ function tryAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = f
         label: "Cover",
       });
     }
-    return;
+    return true;
   }
 
   const defense = target.inventory.armor?.effects.defense ?? 0;
@@ -391,6 +417,7 @@ function tryAttack(match: MatchState, attacker: Bot, target: Bot, isBetrayal = f
     });
     emitKillEvents(match, attacker, target);
   }
+  return true;
 }
 
 function tryAttackCreature(match: MatchState, attacker: Bot, creature: Creature): void {
@@ -439,10 +466,23 @@ function pickupLoot(match: MatchState, bot: Bot): void {
     (item) => distance(bot, item) <= config.loot.pickupRadius && shouldPickup(bot, item, match),
   );
 
-  if (lootIndex === -1) {
-    return;
-  }
+  if (lootIndex !== -1) collectLootAtIndex(match, bot, lootIndex);
+}
 
+export function applyLootInteraction(match: MatchState, bot: Bot, objectId: string, interaction: "take" | "use"): boolean {
+  const lootIndex = match.loot.findIndex((item) => item.id === objectId);
+  if (lootIndex === -1 || distance(bot, match.loot[lootIndex]) > getMatchConfig(match).loot.pickupRadius) {
+    return false;
+  }
+  const item = match.loot[lootIndex];
+  if ((interaction === "use") !== (item.type === "medkit")) {
+    return false;
+  }
+  collectLootAtIndex(match, bot, lootIndex);
+  return true;
+}
+
+function collectLootAtIndex(match: MatchState, bot: Bot, lootIndex: number): void {
   const item = match.loot[lootIndex];
 
   if (item.type === "credits") {
@@ -618,6 +658,37 @@ function finishIfNeeded(match: MatchState): void {
       emitMatchEvent(match, createMatchWinnerEvent(living[0], nextMatchEventBase(match, "match-winner")));
     }
   }
+}
+
+function finishOvertimeMatch(match: MatchState): void {
+  const config = getMatchConfig(match);
+  const living = match.bots.filter((bot) => bot.alive);
+  if (living.length <= config.rules.winnersRemaining || match.elapsedMs < config.rules.maxDurationMs) {
+    return;
+  }
+
+  const finalists = [...living].sort(
+    (a, b) =>
+      b.kills - a.kills ||
+      b.damageDealt - a.damageDealt ||
+      b.health - a.health ||
+      a.id.localeCompare(b.id),
+  );
+  const winner = finalists[0];
+
+  for (const bot of finalists.slice(config.rules.winnersRemaining)) {
+    bot.alive = false;
+    bot.health = 0;
+    bot.survivalTimeMs = match.elapsedMs;
+  }
+
+  addEvent(match, `${winner.name} wins the overtime decision.`, "overtime-decision", 0, {
+    kind: "system",
+    botId: winner.id,
+    x: winner.x,
+    y: winner.y,
+    label: "Overtime",
+  });
 }
 
 function emitKillEvents(match: MatchState, attacker: Bot, target: Bot): void {

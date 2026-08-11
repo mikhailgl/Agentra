@@ -10,6 +10,8 @@ services:
     startCommand: npm run start --workspace backend
     healthCheckPath: /health
     envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
       - key: NODE_ENV
         value: production
       # Set these secret values in the Render Dashboard after creating the service.
@@ -32,6 +34,8 @@ services:
     buildCommand: npm ci && npm run build --workspace frontend
     staticPublishPath: frontend/dist
     envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
       - key: VITE_API_BASE_URL
         value: https://botarena-backend.onrender.com
     routes:

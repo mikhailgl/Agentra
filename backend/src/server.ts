@@ -34,6 +34,7 @@ const playerService = new PlayerService(new PlayerAccountRepository(supabase));
 const creatorApiService = new CreatorApiService(new CreatorApiRepository(supabase));
 const communityRepository = new CommunityRepository(supabase);
 const arena = new ArenaService({
+  agentRuntimeMode: config.agentRuntimeMode,
   onCheckpointNeeded: saveArenaCheckpoint,
   onMatchLogReady: saveMatchLog,
   onMatchCompleted: settleCompletedMatch,
@@ -669,6 +670,12 @@ async function finishLateArenaRestore(checkpointLoad: Promise<ArenaCheckpoint | 
           throw error;
         }
         await delay(Math.min(5_000, recoveryDeadline - Date.now()));
+        // Do not launch a final repository request after the retry deadline.
+        // A rejected request created here would never be awaited by the loop
+        // and would terminate Node as an unhandled rejection.
+        if (Date.now() >= recoveryDeadline) {
+          throw error;
+        }
         nextLoad = arenaCheckpointRepository.load();
       }
     }

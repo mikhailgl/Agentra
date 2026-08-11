@@ -4,7 +4,7 @@ import { createDefaultPool } from "../../../frontend/src/game/persistence.js";
 import type { PersistentBot } from "../../../frontend/src/game/types.js";
 import { ArenaService, type ArenaCheckpoint } from "../arenaService.js";
 
-test("version 3 checkpoints preserve the persistent roster and league", () => {
+test("version 4 checkpoints preserve the persistent roster, league, and agent runtime", () => {
   const service = new ArenaService();
   const customBot = createCustomBot();
   const snapshot = service.registerCustomBot(customBot, true);
@@ -14,7 +14,8 @@ test("version 3 checkpoints preserve the persistent roster and league", () => {
   assert.equal(snapshot.arenaQueueIds?.[0], customBot.id);
 
   const checkpoint = service.getCheckpoint();
-  assert.equal(checkpoint.version, 3);
+  assert.equal(checkpoint.version, 4);
+  assert.equal(checkpoint.agentRuntime?.mode, "legacy");
   assert.ok(checkpoint.persistentBots?.some((bot) => bot.id === customBot.id));
   assert.ok(checkpoint.leagueState?.standings.some((standing) => standing.botId === customBot.id));
 
@@ -24,6 +25,18 @@ test("version 3 checkpoints preserve the persistent roster and league", () => {
   assert.ok(restoredSnapshot.persistentBots?.some((bot) => bot.id === customBot.id));
   assert.equal(restoredSnapshot.arenaQueueIds?.[0], customBot.id);
   assert.equal(restoredSnapshot.leagueState.seasonId, checkpoint.leagueState?.seasonId);
+});
+
+test("autonomous-fake mode advances without invoking legacy bot thoughts", async () => {
+  const service = new ArenaService({ agentRuntimeMode: "autonomous-fake" });
+  service.start();
+  await new Promise((resolve) => setTimeout(resolve, 130));
+  service.stop();
+
+  const checkpoint = service.getCheckpoint();
+  assert.equal(checkpoint.agentRuntime?.mode, "autonomous-fake");
+  assert.ok((checkpoint.agentRuntime?.activeActions.length ?? 0) > 0 || (checkpoint.agentRuntime?.decisionTrace.length ?? 0) > 0);
+  assert.ok(checkpoint.match.bots.every((bot) => bot.thoughts.length === 0));
 });
 
 test("legacy checkpoints still restore without league state", () => {

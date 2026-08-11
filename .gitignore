@@ -8,3 +8,4 @@ backend/dist
 .DS_Store
 *.tsbuildinfo
 .gstack/
+.vercel/

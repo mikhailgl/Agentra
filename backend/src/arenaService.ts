@@ -10,10 +10,11 @@ import {
   summarizeDoctrine,
 } from "../../frontend/src/game/persistence.js";
 import { createRng, shuffle } from "../../frontend/src/game/random.js";
-import { spawnSponsorDrop, stepSimulation, type SponsorDropKind } from "../../frontend/src/game/simulation.js";
+import { spawnSponsorDrop, stepAutonomousSimulation, stepSimulation, type SponsorDropKind } from "../../frontend/src/game/simulation.js";
 import type { ArenaState, BaseStats, BasicMatchResult, Bot, BotAffinities, LeagueState, MatchLog, MatchState, PersistentBot, Psychology } from "../../frontend/src/game/types.js";
 import { toArenaViewModel } from "../../frontend/src/lib/simulation/simulationTo3D.js";
 import type { ArenaViewModel } from "../../frontend/src/lib/simulation/types.js";
+import { AgentRuntime, type AgentModelProvider, type AgentRuntimeCheckpoint, type AgentRuntimeMode } from "./agentRuntime.js";
 
 const INTERMISSION_MS = 5_000;
 const TICK_MS = 50;
@@ -42,7 +43,7 @@ export type ArenaStreamFrame = {
 };
 
 export type ArenaCheckpoint = {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   matchNumber: number;
   match: MatchState;
   arenaState: ArenaState;
@@ -50,7 +51,16 @@ export type ArenaCheckpoint = {
   arenaQueueIds: string[];
   basicResults: BasicMatchResult[];
   leagueState?: LeagueState;
+  agentRuntime?: AgentRuntimeCheckpoint;
   savedAt: number;
+};
+
+export type ArenaServiceOptions = {
+  agentRuntimeMode?: AgentRuntimeMode;
+  agentProvider?: AgentModelProvider;
+  onCheckpointNeeded?: (reason: string) => void;
+  onMatchLogReady?: (log: MatchLog) => void;
+  onMatchCompleted?: (match: MatchState, competition: MatchLog["competition"]) => void;
 };
 
 export class ArenaService {
@@ -62,10 +72,12 @@ export class ArenaService {
   private leagueState = createLeagueState(this.persistentBots);
   private match: MatchState;
   private arenaState: ArenaState;
+  private readonly agentRuntime: AgentRuntime;
   private lastTickAt = Date.now();
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly options: { onCheckpointNeeded?: (reason: string) => void; onMatchLogReady?: (log: MatchLog) => void; onMatchCompleted?: (match: MatchState, competition: MatchLog["competition"]) => void } = {}) {
+  constructor(private readonly options: ArenaServiceOptions = {}) {
+    this.agentRuntime = new AgentRuntime(options.agentRuntimeMode ?? "legacy", options.agentProvider);
     this.match = this.createMatch();
     this.arenaState = this.createRunningArenaState(this.match);
   }
@@ -120,7 +132,7 @@ export class ArenaService {
 
   getCheckpoint(): ArenaCheckpoint {
     return {
-      version: 3,
+      version: 4,
       matchNumber: this.matchNumber,
       match: this.match.finalized ? createPublicMatchSnapshot(this.match, { thoughtLimit: 0 }) : cloneJson(this.match),
       arenaState: cloneJson(this.arenaState),
@@ -128,6 +140,7 @@ export class ArenaService {
       arenaQueueIds: [...this.arenaQueueIds],
       basicResults: cloneJson(this.basicResults),
       leagueState: cloneJson(this.leagueState),
+      agentRuntime: this.agentRuntime.checkpoint(),
       savedAt: Date.now(),
     };
   }
@@ -142,6 +155,7 @@ export class ArenaService {
     this.arenaQueueIds = this.normalizeQueueIds(checkpoint.arenaQueueIds, new Set(this.match.bots.map((bot) => bot.id)));
     this.basicResults = cloneJson(checkpoint.basicResults).slice(0, MAX_BASIC_RESULTS);
     this.leagueState = checkpoint.leagueState ? cloneJson(checkpoint.leagueState) : createLeagueState(this.persistentBots);
+    this.agentRuntime.restore(checkpoint.agentRuntime);
     this.lastTickAt = Date.now();
   }
 
@@ -162,6 +176,7 @@ export class ArenaService {
     this.leagueState = advanceLeagueSeason(this.leagueState, this.persistentBots);
     this.matchNumber += 1;
     this.match = this.createMatch(this.arenaState.lastWinnerId);
+    this.agentRuntime.reset();
     this.arenaState = this.createRunningArenaState(this.match);
     this.lastTickAt = Date.now();
     return this.getSnapshot();
@@ -258,7 +273,12 @@ export class ArenaService {
       return;
     }
 
-    stepSimulation(this.match, deltaMs);
+    if (this.agentRuntime.mode === "autonomous-fake") {
+      stepAutonomousSimulation(this.match, deltaMs);
+      this.agentRuntime.tick(this.match, deltaMs, now);
+    } else {
+      stepSimulation(this.match, deltaMs);
+    }
     this.finalizeMatchIfNeeded();
     this.syncActiveBotIds();
   }

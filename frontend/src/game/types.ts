@@ -87,6 +87,7 @@ export type MatchConfig = {
     winnersRemaining: number;
     finalPhaseBotCount: number;
     maxVisibleEvents: number;
+    maxDurationMs: number;
   };
   ai: {
     visibleEnemyRange: number;
@@ -709,4 +710,120 @@ export type Creature = {
   lastAttackAt: number;
   arenaEventId?: string;
   expiresAtMs?: number;
+};
+
+export type AgentKnowledgeSource = "witnessed" | "heard" | "inferred" | "action_result";
+
+export type AgentMemory = {
+  id: string;
+  createdAtMs: number;
+  source: AgentKnowledgeSource;
+  summary: string;
+  eventIds: number[];
+  speakerId?: string;
+};
+
+export type AgentSpeech = {
+  id: string;
+  speakerId: string;
+  message: string;
+  targetIds?: string[];
+  position: Point;
+  createdAtMs: number;
+  hearingRange: number;
+};
+
+export type HeardUtterance = {
+  speechId: string;
+  speakerId: string;
+  speakerName: string;
+  message: string;
+  targetIds?: string[];
+  heardAtMs: number;
+  source: "heard";
+};
+
+export type ObservedPerson = {
+  id: string;
+  name: string;
+  position: Point;
+  distance: number;
+  condition: "healthy" | "hurt" | "critical";
+  visiblyArmed: boolean;
+};
+
+export type ObservedObject = {
+  id: string;
+  kind: "loot" | "creature";
+  name: string;
+  position: Point;
+  distance: number;
+  details: Record<string, string | number | boolean>;
+};
+
+export type ObservedEvent = {
+  eventId: number;
+  timeMs: number;
+  message: string;
+  source: "witnessed";
+  actorId?: string;
+  targetId?: string;
+};
+
+export type AvailableAction = {
+  type: AgentAction["type"];
+  targetIds?: string[];
+  objectIds?: string[];
+};
+
+export type AgentObservation = {
+  id: string;
+  matchId: string;
+  createdAtMs: number;
+  self: {
+    id: string;
+    name: string;
+    health: number;
+    position: Point;
+    inventory: Inventory;
+  };
+  knownRule: "Only one living participant can leave";
+  location: {
+    biome: BiomeType;
+    biomeName: string;
+  };
+  visiblePeople: ObservedPerson[];
+  visibleObjects: ObservedObject[];
+  heardSpeech: HeardUtterance[];
+  observedEvents: ObservedEvent[];
+  relevantMemories: AgentMemory[];
+  availableActions: AvailableAction[];
+};
+
+export type AgentAction =
+  | { type: "move"; destination: Point }
+  | { type: "speak"; message: string; targetIds?: string[] }
+  | { type: "inspect"; objectId: string }
+  | { type: "take"; objectId: string }
+  | { type: "use"; objectId: string; targetId?: string }
+  | { type: "attack"; targetId: string; weaponId?: string }
+  | { type: "wait" };
+
+export type AgentActionResult = {
+  status: "in_progress" | "completed" | "rejected";
+  actionType: AgentAction["type"];
+  message: string;
+  completedAtMs?: number;
+  eventIds: number[];
+};
+
+export type AgentDecisionTrace = {
+  id: string;
+  matchId: string;
+  agentId: string;
+  observationId: string;
+  operationId: string;
+  proposedAction: AgentAction;
+  result: AgentActionResult;
+  recordedAtMs: number;
 };

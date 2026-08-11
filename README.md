@@ -96,6 +96,8 @@ Run the backend:
 npm run dev:backend
 ```
 
+The backend defaults to the existing decision system. To exercise the new autonomous-agent harness without model calls, set `AGENT_RUNTIME=autonomous-fake` in `backend/.env`. Fake participants receive private observations and use the same validated action boundary intended for live models.
+
 Run the frontend in another terminal:
 
 ```bash
@@ -229,6 +231,7 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 CORS_ORIGINS=http://localhost:5173,https://your-vercel-app.vercel.app
 CORS_ORIGIN_SUFFIXES=vercel.app
+AGENT_RUNTIME=legacy
 ```
 
 ## Migration From Local Persistence

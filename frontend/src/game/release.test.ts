@@ -3,6 +3,7 @@ import test from "node:test";
 import { createMatchFromPool } from "./createMatch";
 import { createMatchLog } from "./matchLog";
 import { DEFAULT_MATCH_CONFIG } from "./matchConfig";
+import { moveAway } from "./math";
 import { applyPersistentBotMatchResult, createDefaultPool } from "./persistence";
 import { getSponsorDropCost, placeBet, resolveMatchBets } from "./player";
 import { stepSimulation } from "./simulation";
@@ -27,6 +28,30 @@ test("configured matches use their own geometry and allowed event set", () => {
   stepSimulation(match, 50);
   assert.equal(match.arenaEvents.length, 1);
   assert.equal(match.arenaEvents[0].type, "danger_zone");
+});
+
+test("coincident fighters separate inward and respect arena padding", () => {
+  const next = moveAway({ x: 1_000, y: 1_000 }, { x: 1_000, y: 1_000 }, 40, DEFAULT_MATCH_CONFIG);
+
+  assert.ok(next.x < 982);
+  assert.ok(next.y < 982);
+  assert.ok(next.x >= DEFAULT_MATCH_CONFIG.arena.edgePadding);
+  assert.ok(next.y >= DEFAULT_MATCH_CONFIG.arena.edgePadding);
+});
+
+test("overtime deterministically resolves a stalled match", () => {
+  const pool = createDefaultPool();
+  const match = createMatchFromPool(pool, pool.slice(0, 3), undefined, 0, {
+    roster: { matchBotCount: 3 },
+    rules: { maxDurationMs: 1 },
+  });
+  match.bots[1].kills = 3;
+
+  stepSimulation(match, 50);
+
+  assert.equal(match.ended, true);
+  assert.equal(match.winnerId, match.bots[1].id);
+  assert.equal(match.bots.filter((bot) => bot.alive).length, 1);
 });
 
 test("bet settlement pays winners once and preserves ownership", () => {

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import type { AgentRuntimeMode } from "./agentRuntime.js";
 
 export type AppConfig = {
   port: number;
@@ -6,6 +7,7 @@ export type AppConfig = {
   supabaseServiceRoleKey: string;
   corsOrigins: string[];
   corsOriginSuffixes: string[];
+  agentRuntimeMode: AgentRuntimeMode;
 };
 
 export function getConfig(): AppConfig {
@@ -32,5 +34,12 @@ export function getConfig(): AppConfig {
       .split(",")
       .map((suffix) => suffix.trim())
       .filter(Boolean),
+    agentRuntimeMode: parseAgentRuntimeMode(process.env.AGENT_RUNTIME),
   };
+}
+
+function parseAgentRuntimeMode(value: string | undefined): AgentRuntimeMode {
+  if (!value || value === "legacy") return "legacy";
+  if (value === "autonomous-fake") return value;
+  throw new Error(`AGENT_RUNTIME must be legacy or autonomous-fake, received ${value}`);
 }
