@@ -4,8 +4,12 @@ import type { ArenaViewModel } from "../lib/simulation/types";
 
 const CLIENT_ID_KEY = "ai-battle:client-id:v1";
 const PLAYER_SESSION_TOKEN_KEY = "botarena:player-session:v1";
+const ARENA_SNAPSHOT_CACHE_KEY = "botarena:arena-snapshot:v1";
+const ARENA_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60_000;
+const ARENA_SNAPSHOT_CACHE_INTERVAL_MS = 15_000;
 let remoteSyncEnabled = false;
 let playerSessionPromise: Promise<RemotePlayerSession | null> | null = null;
+let lastArenaSnapshotCacheWrite = 0;
 
 export type RemoteGameState = {
   persistentBots?: PersistentBot[];
@@ -50,6 +54,40 @@ function getApiBaseUrl(): string | null {
 
 export function hasArenaBackend(): boolean {
   return Boolean(getApiBaseUrl());
+}
+
+export function loadCachedArenaSnapshot(): ArenaSnapshot | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(ARENA_SNAPSHOT_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as { savedAt?: unknown; snapshot?: unknown };
+    if (
+      typeof cached.savedAt !== "number" ||
+      Date.now() - cached.savedAt > ARENA_SNAPSHOT_MAX_AGE_MS ||
+      !isArenaSnapshot(cached.snapshot)
+    ) {
+      window.localStorage.removeItem(ARENA_SNAPSHOT_CACHE_KEY);
+      return null;
+    }
+    return cached.snapshot;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheArenaSnapshot(snapshot: ArenaSnapshot): void {
+  if (typeof window === "undefined" || Date.now() - lastArenaSnapshotCacheWrite < ARENA_SNAPSHOT_CACHE_INTERVAL_MS) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(ARENA_SNAPSHOT_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), snapshot }));
+    lastArenaSnapshotCacheWrite = Date.now();
+  } catch {
+    // A live arena is still usable when storage is unavailable or full.
+  }
 }
 
 export function getGameClientId(): string {
@@ -232,6 +270,20 @@ export async function loadArenaSnapshot(options: { includeRoster?: boolean } = {
   }
 
   return (await response.json()) as ArenaSnapshot;
+}
+
+function isArenaSnapshot(value: unknown): value is ArenaSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<ArenaSnapshot>;
+  return Boolean(
+    snapshot.match &&
+      typeof snapshot.match === "object" &&
+      snapshot.arenaState &&
+      typeof snapshot.arenaState === "object" &&
+      snapshot.leagueState &&
+      typeof snapshot.leagueState === "object" &&
+      typeof snapshot.serverTime === "number",
+  );
 }
 
 export async function loadMatchLogs(limit = 25): Promise<MatchLog[]> {
