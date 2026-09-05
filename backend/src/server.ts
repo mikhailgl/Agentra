@@ -16,8 +16,13 @@ import { createSupabaseAdmin } from "./supabase.js";
 import { BOT_CONTEST_ENTRY_FEE, CUSTOM_BOT_CREATION_COST, getOddsForBetType, getSponsorDropCost } from "../../frontend/src/game/player.js";
 import type { SponsorDropKind } from "../../frontend/src/game/simulation.js";
 import type { BetType, MatchLog } from "../../frontend/src/game/types.js";
+import { loadActorControllers } from "./survival/modelConfig.js";
+import { SurvivalRepository } from "./survival/repository.js";
+import { SurvivalService } from "./survival/service.js";
 
-const ARENA_INITIALIZATION_TIMEOUT_MS = 10_000;
+// Do not hold the public arena behind a slow checkpoint read. The late-restore
+// path below safely applies the canonical checkpoint when persistence catches up.
+const ARENA_INITIALIZATION_TIMEOUT_MS = 2_000;
 const ARENA_LATE_RESTORE_TIMEOUT_MS = 50_000;
 const ARENA_CHECKPOINT_INTERVAL_MS = 5 * 60_000;
 const ARENA_STREAM_INTERVAL_MS = 500;
@@ -26,6 +31,12 @@ const SPONSOR_DROP_KINDS: ReadonlySet<SponsorDropKind> = new Set(["Knife", "Spea
 const config = getConfig();
 const app = express();
 const supabase = createSupabaseAdmin(config);
+const survival = new SurvivalService(
+  new SurvivalRepository(supabase),
+  loadActorControllers(),
+  Number(process.env.SURVIVAL_DECISION_LIMIT ?? 120),
+);
+void survival.initialize().then(() => survival.start());
 const repository = new GameStateRepository(supabase);
 const arenaCheckpointRepository = new ArenaCheckpointRepository(supabase);
 const matchLogRepository = new MatchLogRepository(supabase);
@@ -150,6 +161,12 @@ app.get("/health", (_request, response) => {
     checkpointPersistenceReady,
     ...(arenaRecoveryWarning ? { warning: arenaRecoveryWarning } : {}),
   });
+});
+
+// Spectators can observe but cannot spend model credits or command survivors.
+app.get("/api/survival", (_request, response) => {
+  response.setHeader("Cache-Control", "no-store");
+  response.json(survival.snapshot());
 });
 
 app.get("/api/state", async (request, response, next) => {

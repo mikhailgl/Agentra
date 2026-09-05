@@ -19,6 +19,12 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SURVIVAL_DECISION_LIMIT
+        value: "120"
       - key: CORS_ORIGINS
         value: https://botarena-frontend.onrender.com
       # Allows Vercel preview branch URLs like https://project-git-branch-team.vercel.app.

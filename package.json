@@ -9,6 +9,7 @@
     "sdk"
   ],
   "scripts": {
+    "dev:survival": "npm run dev:survival --workspace backend",
     "dev": "npm run dev --workspace frontend",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:backend": "npm run dev --workspace backend",

@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ThreeArena } from "./components/arena/ThreeArena";
 import { CustomBotCreator } from "./components/CustomBotCreator";
 import { LudusView } from "./components/LudusView";
 import { PostMatchResults, createPostMatchSummary } from "./components/PostMatchResults";
@@ -12,9 +11,11 @@ import { CUSTOM_BOT_CREATION_COST, getPlayerState, placeBet, resolveMatchBets, s
 import { addCustomPersistentBot, loadPersistentBots, removeCustomPersistentBot, savePersistentBots, updatePersistentBotDoctrine } from "./game/persistence";
 import {
   enableRemoteGameStateSync,
+  cacheArenaSnapshot,
   hasArenaBackend,
   issueRemoteCreatorApiKey,
   loadArenaSnapshot,
+  loadCachedArenaSnapshot,
   setRemoteFavoriteBot,
   loadRemoteOwnedBots,
   loadRemotePlayer,
@@ -48,8 +49,12 @@ type CustomBotBuild = {
 };
 
 const ARENA_UI_SYNC_MS = 5_000;
+const ARENA_CONNECT_RETRY_MS = 1_000;
 const ROSTER_POLL_MS = 60_000;
 type ActiveView = "arena" | "league" | "fantasy" | "ludus" | "videos" | "story" | "fighter";
+const loadThreeArena = () =>
+  import("./components/arena/ThreeArena").then((module) => ({ default: module.ThreeArena }));
+const ThreeArena = lazy(loadThreeArena);
 const GeneratedVideosView = lazy(() =>
   import("./components/GeneratedVideosView").then((module) => ({ default: module.GeneratedVideosView })),
 );
@@ -67,15 +72,16 @@ const FighterProfileView = lazy(() =>
 );
 
 function App() {
-  const matchRef = useRef<MatchState | null>(null);
-  const arenaStateRef = useRef<ArenaState | null>(null);
+  const [cachedArenaSnapshot] = useState(loadCachedArenaSnapshot);
+  const matchRef = useRef<MatchState | null>(cachedArenaSnapshot?.match ?? null);
+  const arenaStateRef = useRef<ArenaState | null>(cachedArenaSnapshot?.arenaState ?? null);
   const postMatchSummaryMatchRef = useRef<number | null>(null);
   const sponsorDropInFlightRef = useRef(false);
   const botMutationInFlightRef = useRef(false);
 
-  const [matchView, setMatchView] = useState<MatchState | null>(null);
-  const [arenaState, setArenaState] = useState<ArenaState | null>(null);
-  const [leagueState, setLeagueState] = useState<LeagueState | null>(null);
+  const [matchView, setMatchView] = useState<MatchState | null>(cachedArenaSnapshot?.match ?? null);
+  const [arenaState, setArenaState] = useState<ArenaState | null>(cachedArenaSnapshot?.arenaState ?? null);
+  const [leagueState, setLeagueState] = useState<LeagueState | null>(cachedArenaSnapshot?.leagueState ?? null);
   const [visualArenaView, setVisualArenaView] = useState<ArenaViewModel | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow_action");
@@ -91,6 +97,7 @@ function App() {
   const [arenaConnectionError, setArenaConnectionError] = useState<string | null>(() =>
     hasArenaBackend() ? null : "Arena backend is not configured.",
   );
+  const [arenaConnectionPending, setArenaConnectionPending] = useState(hasArenaBackend);
   const [sponsorDropPending, setSponsorDropPending] = useState(false);
   const [botMutationPending, setBotMutationPending] = useState(false);
   const [playerSessionReady, setPlayerSessionReady] = useState(() => !hasArenaBackend());
@@ -137,6 +144,8 @@ function App() {
 
   const applyArenaSnapshot = useCallback((snapshot: ArenaSnapshot) => {
     setArenaConnectionError(null);
+    setArenaConnectionPending(false);
+    cacheArenaSnapshot(snapshot);
     matchRef.current = snapshot.match;
     arenaStateRef.current = snapshot.arenaState;
     setMatchView(snapshot.match);
@@ -411,6 +420,10 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void loadThreeArena();
+  }, []);
+
+  useEffect(() => {
     if (cameraMode !== "follow_bot") return;
     if (!selectedBotId) {
       setCameraMode("follow_action");
@@ -559,8 +572,13 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     let requestInFlight = false;
+    let retryTimer: number | null = null;
     const sync = () => {
       if (requestInFlight || document.visibilityState !== "visible") return;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       requestInFlight = true;
       void loadArenaSnapshot()
         .then((snapshot) => {
@@ -570,7 +588,9 @@ function App() {
         })
         .catch((error) => {
           setArenaConnectionError(getErrorMessage(error));
+          setArenaConnectionPending(true);
           console.warn("Arena snapshot sync failed", error);
+          if (!cancelled) retryTimer = window.setTimeout(sync, ARENA_CONNECT_RETRY_MS);
         })
         .finally(() => {
           requestInFlight = false;
@@ -586,6 +606,7 @@ function App() {
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [applyArenaSnapshot]);
@@ -737,6 +758,7 @@ function App() {
           <div className="stage">
             <div className="arena-loading" role="status">
               <strong>{arenaConnectionError ? "Arena engine unavailable" : "Connecting to arena..."}</strong>
+              <a className="secondary-button" href="/survival">Open survival island</a>
               {arenaConnectionError && (
                 <span className="arena-loading-detail" role="alert">
                   {arenaConnectionError} Retrying automatically.
@@ -754,6 +776,7 @@ function App() {
       <section className="simulation-area">
         <div className="stage">
           <nav className="view-switcher" aria-label="Primary views">
+            <a className="secondary-button" href="/survival">Survival island</a>
             <button type="button" className="active">
               Arena
             </button>
@@ -770,14 +793,21 @@ function App() {
               Videos
             </button>
           </nav>
-          <ThreeArena
-            arena={renderedArenaView}
-            cameraMode={cameraMode}
-            selectedBotId={selectedBotId}
-            cameraResetToken={cameraResetToken}
-            onSelectBot={selectBot}
-            onClearSelection={() => setSelectedBotId(null)}
-          />
+          <Suspense fallback={<div className="arena-visual-loading" role="status">Loading arena view...</div>}>
+            <ThreeArena
+              arena={renderedArenaView}
+              cameraMode={cameraMode}
+              selectedBotId={selectedBotId}
+              cameraResetToken={cameraResetToken}
+              onSelectBot={selectBot}
+              onClearSelection={() => setSelectedBotId(null)}
+            />
+          </Suspense>
+          {arenaConnectionPending && (
+            <div className="arena-connection-status" role="status">
+              Reconnecting to live arena...
+            </div>
+          )}
           <SpectatorOverlay
             arenaState={arenaState}
             leagueState={leagueState}

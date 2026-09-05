@@ -33,3 +33,23 @@ The Apache License 2.0 text for Concordia is available at https://github.com/goo
 - BotArena adaptation: targeted speech validation and per-listener delivery in `frontend/src/game/agentActions.ts`, `frontend/src/game/perception.ts`, and `backend/src/agentRuntime.ts`
 
 The MIT license text for SOTOPIA is available at https://github.com/sotopia-lab/sotopia/blob/a0aaafb440e570e5e61b7c44a44e5e417c545383/LICENSE.
+
+## Aetheria
+
+- Repository: https://github.com/mositron/Aetheria
+- Revision reviewed: `300c1dc91feb0f412e42d05886086224aa685b7b`
+- License: MIT
+- Upstream inspiration: its procedural primitive-based Three.js approach to expressive characters, equipment, biome dressing, and effects without downloaded model packs.
+- BotArena adaptation: original React Three Fiber geometry in `frontend/src/components/arena/` for articulated fighters, weapon silhouettes, creatures, pickups, and environmental dressing. No upstream source files or binary assets are included.
+
+Aetheria's MIT license statement is available at https://github.com/mositron/Aetheria#license.
+
+## EZ-Tree
+
+- Repository: https://github.com/dgreenheck/ez-tree
+- Revision reviewed: `dcf309bd86bd521083d9c70f01f2de45fdc7c457`
+- License: MIT
+- Upstream inspiration: deterministic tree generation, shared materials, geometry simplification, and LOD/instancing principles for dense vegetation.
+- BotArena adaptation: original deterministic, instanced low-poly tree and foliage components in `frontend/src/components/arena/ArenaEnvironment.tsx`. The EZ-Tree package, textures, and source are not vendored.
+
+The MIT license text for EZ-Tree is available at https://github.com/dgreenheck/ez-tree/blob/dcf309bd86bd521083d9c70f01f2de45fdc7c457/LICENSE.

@@ -9,3 +9,5 @@ backend/dist
 *.tsbuildinfo
 .gstack/
 .vercel/
+
+backend/.local/

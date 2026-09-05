@@ -1,0 +1,12 @@
+{
+  "moss": {
+    "provider": "openai",
+    "model": "gpt-6-astra",
+    "reasoningEffort": "low"
+  },
+  "ember": {
+    "provider": "openai",
+    "model": "gpt-6-astra",
+    "reasoningEffort": "low"
+  }
+}

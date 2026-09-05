@@ -1,5 +1,11 @@
 # BotArena
 
+## Survival island
+
+The new `/survival` view places two independent model-controlled survivors in a shared world with finite resources, crafting, construction, hunger, nighttime exposure and local conversation. Each actor's model can be changed independently in [`backend/survival.models.json`](./backend/survival.models.json); OpenAI, Anthropic and tool-capable Chat Completions endpoints are supported.
+
+Start the local island with `npm run dev:survival`, then start the frontend with `VITE_API_BASE_URL=http://localhost:4000 npm run dev:frontend`. Add provider credentials to `backend/.env` to enable model decisions. See the [survival setup and rules](./docs/survival-world.md) for model selection, checkpoints and usage limits.
+
 BotArena is split into a Vite/React spectator client and a persistent Node arena service. The backend runs the canonical 24/7 simulation, owns secrets and authoritative player mutations, and checkpoints durable world state to Supabase.
 
 ## Architecture
