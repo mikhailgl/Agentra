@@ -176,6 +176,26 @@
   padding: 8px 10px;
   border-radius: 3px;
 }
+.survival-context-status {
+  position: absolute;
+  inset: 0;
+  z-index: 16777272;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 24px;
+  background: #d4ddce;
+  color: #243930;
+  text-align: center;
+}
+.survival-context-status button {
+  width: auto;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 4px;
+  background: #203a30;
+  color: #edf0e4;
+}
 .survival-map-label i {
   width: 5px;
   height: 5px;

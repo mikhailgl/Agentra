@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
-import { memo, useLayoutEffect, useMemo, useRef } from "react";
-import { Color, Group, InstancedMesh, Object3D, Vector3 } from "three";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Color, Group, InstancedMesh, Object3D, PCFShadowMap, Vector3 } from "three";
 import { isDaylight, isWater } from "../game/survival/types";
 import type {
   Resource,
@@ -11,6 +11,25 @@ import type {
 
 type World = SurvivalSnapshot["world"];
 type Bot = World["bots"][number];
+
+function ContextStatus({ onLost }: { onLost: (lost: boolean) => void }) {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const lost = (event: Event) => {
+      event.preventDefault();
+      onLost(true);
+    };
+    const restored = () => onLost(false);
+    canvas.addEventListener("webglcontextlost", lost);
+    canvas.addEventListener("webglcontextrestored", restored);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", lost);
+      canvas.removeEventListener("webglcontextrestored", restored);
+    };
+  }, [gl, onLost]);
+  return null;
+}
 
 function CameraReset({ token }: { token: number }) {
   const camera = useThree((s) => s.camera);
@@ -304,54 +323,74 @@ export default function SurvivalScene({
   reset: number;
 }) {
   const daylight = isDaylight(world.time);
+  // Touch devices have a much smaller GPU budget, especially on iOS.
+  const [touchDevice] = useState(() => matchMedia("(pointer: coarse)").matches);
+  const [contextLost, setContextLost] = useState(false);
+  const [generation, setGeneration] = useState(0);
   return (
-    <Canvas
-      shadows
-      dpr={[1, 1.75]}
-      camera={{ position: [27, 23, 31], fov: 40 }}
-      aria-label="Three-dimensional survival island. Select a survivor using the cards beside the world."
-    >
-      <color attach="background" args={[daylight ? "#d4ddce" : "#1b2d3f"]} />
-      <fog attach="fog" args={[daylight ? "#d4ddce" : "#1b2d3f", 35, 80]} />
-      <ambientLight intensity={daylight ? 1.25 : 0.45} />
-      <directionalLight
-        position={[6, 22, 6]}
-        intensity={daylight ? 2.4 : 0.55}
-        color={daylight ? "#ffdfaf" : "#a4caff"}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-24}
-        shadow-camera-right={24}
-        shadow-camera-top={24}
-        shadow-camera-bottom={-24}
-        shadow-normalBias={0.035}
-      />
-      <Ground size={world.size} />
-      {world.resources.map((r) => (
-        <ResourceModel key={r.id} resource={r} />
-      ))}
-      {world.structures.map((s) => (
-        <Building key={s.id} structure={s} />
-      ))}
-      {world.bots.map((bot) => (
-        <Character
-          key={bot.id}
-          bot={bot}
-          selected={selected === bot.id}
-          thinking={thinking.includes(bot.id)}
-          time={world.time}
-          onSelect={onSelect}
+    <>
+      <Canvas
+        key={generation}
+        shadows={touchDevice ? false : { type: PCFShadowMap }}
+        dpr={touchDevice ? 1 : [1, 1.75]}
+        gl={{ antialias: !touchDevice, alpha: false }}
+        camera={{ position: [27, 23, 31], fov: 40 }}
+        aria-label="Three-dimensional survival island. Select a survivor using the cards beside the world."
+      >
+        <ContextStatus onLost={setContextLost} />
+        <color attach="background" args={[daylight ? "#d4ddce" : "#1b2d3f"]} />
+        <fog attach="fog" args={[daylight ? "#d4ddce" : "#1b2d3f", 35, 80]} />
+        <ambientLight intensity={daylight ? 1.25 : 0.45} />
+        <directionalLight
+          position={[6, 22, 6]}
+          intensity={daylight ? 2.4 : 0.55}
+          color={daylight ? "#ffdfaf" : "#a4caff"}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-camera-left={-24}
+          shadow-camera-right={24}
+          shadow-camera-top={24}
+          shadow-camera-bottom={-24}
+          shadow-normalBias={0.035}
         />
-      ))}
-      <OrbitControls
-        key={reset}
-        makeDefault
-        target={[11.5, 0, 11.5]}
-        minDistance={5}
-        maxDistance={45}
-        maxPolarAngle={Math.PI * 0.46}
-      />
-      <CameraReset token={reset} />
-    </Canvas>
+        <Ground size={world.size} />
+        {world.resources.map((r) => (
+          <ResourceModel key={r.id} resource={r} />
+        ))}
+        {world.structures.map((s) => (
+          <Building key={s.id} structure={s} />
+        ))}
+        {world.bots.map((bot) => (
+          <Character
+            key={bot.id}
+            bot={bot}
+            selected={selected === bot.id}
+            thinking={thinking.includes(bot.id)}
+            time={world.time}
+            onSelect={onSelect}
+          />
+        ))}
+        <OrbitControls
+          key={reset}
+          makeDefault
+          target={[11.5, 0, 11.5]}
+          minDistance={5}
+          maxDistance={45}
+          maxPolarAngle={Math.PI * 0.46}
+        />
+        <CameraReset token={reset} />
+      </Canvas>
+      {contextLost && (
+        <div className="survival-context-status" role="status">
+          <p>The 3D view was interrupted.</p>
+          <button type="button" onClick={() => {
+            setContextLost(false);
+            setGeneration((value) => value + 1);
+          }}>
+            Reload 3D view
+          </button>
+        </div>
+      )}
+    </>
   );
 }
