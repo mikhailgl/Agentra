@@ -12,6 +12,7 @@ const resource = z.object({
   id: z.string(),
   kind: z.enum(["tree", "rock", "bush"]),
   remaining: z.number().int().nonnegative(),
+  regrowAt: z.number().nonnegative().nullable(),
 });
 const count = z.number().int().nonnegative();
 const worldSchema = z.object({
@@ -83,10 +84,12 @@ const worldSchema = z.object({
         speech: z.object({ message: z.string(), until: z.number() }).nullable(),
       }),
     )
-    .length(2),
+    .length(4),
 });
 export const checkpointSchema = z.object({
   world: worldSchema,
+  paused: z.boolean(),
+  speed: z.number().min(0.25).max(8),
   decisions: count,
   inputTokens: count,
   outputTokens: count,
@@ -94,6 +97,8 @@ export const checkpointSchema = z.object({
 });
 export type SurvivalCheckpoint = {
   world: SurvivalWorld;
+  paused: boolean;
+  speed: number;
   decisions: number;
   inputTokens: number;
   outputTokens: number;
@@ -110,7 +115,7 @@ export class SurvivalRepository implements SurvivalStore {
     const { data, error } = await this.supabase
       .from("arena_states")
       .select("state")
-      .eq("client_id", "survival-world")
+      .eq("client_id", "survival-world-four")
       .abortSignal(AbortSignal.timeout(10_000))
       .maybeSingle();
     if (error) throw error;
@@ -122,7 +127,7 @@ export class SurvivalRepository implements SurvivalStore {
     const { error } = await this.supabase
       .from("arena_states")
       .upsert({
-        client_id: "survival-world",
+        client_id: "survival-world-four",
         state: checkpoint,
         updated_at: checkpoint.savedAt,
       })

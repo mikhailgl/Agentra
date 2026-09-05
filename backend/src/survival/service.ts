@@ -25,16 +25,13 @@ export class SurvivalService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private stepping = false;
   private stopped = false;
-  private stepFinished: (() => void) | null = null;
+  private stepWaiters: (() => void)[] = [];
   private runtime: SurvivalSnapshot["runtime"];
 
   constructor(
     private readonly store: SurvivalStore,
     private readonly actors: ActorControllers,
-    decisionLimit = 120,
   ) {
-    if (!Number.isInteger(decisionLimit) || decisionLimit < 1)
-      throw new Error("SURVIVAL_DECISION_LIMIT must be a positive integer.");
     this.runtime = {
       status: "starting",
       message: "Restoring the island…",
@@ -43,7 +40,7 @@ export class SurvivalService {
       ),
       thinking: [],
       decisions: 0,
-      decisionLimit,
+      speed: 1,
       inputTokens: 0,
       outputTokens: 0,
       lastLatencyMs: null,
@@ -57,6 +54,7 @@ export class SurvivalService {
       if (checkpoint) {
         this.world = structuredClone(checkpoint.world);
         Object.assign(this.runtime, {
+          speed: checkpoint.speed,
           decisions: checkpoint.decisions,
           inputTokens: checkpoint.inputTokens,
           outputTokens: checkpoint.outputTokens,
@@ -68,10 +66,14 @@ export class SurvivalService {
       const missing = Object.entries(this.actors)
         .filter(([, actor]) => !actor.provider)
         .map(([id]) => id);
-      this.runtime.status = missing.length ? "unconfigured" : "running";
+      this.runtime.status = missing.length
+        ? "unconfigured"
+        : checkpoint?.paused
+          ? "paused"
+          : "running";
       this.runtime.message = missing.length
         ? `The island is ready. Configure model credentials for ${missing.join(" and ")} to start.`
-        : "Two independent minds. One shared world.";
+        : "Four independent minds. One shared world.";
     } catch {
       this.fail(
         "Could not restore the saved island. Check the backend checkpoint storage; the saved world has not been overwritten.",
@@ -108,6 +110,8 @@ export class SurvivalService {
   checkpoint(): SurvivalCheckpoint {
     return {
       world: structuredClone(this.world),
+      paused: this.runtime.status === "paused",
+      speed: this.runtime.speed,
       decisions: this.runtime.decisions,
       inputTokens: this.runtime.inputTokens,
       outputTokens: this.runtime.outputTokens,
@@ -119,6 +123,33 @@ export class SurvivalService {
     const checkpoint = this.checkpoint();
     await this.store.save(checkpoint);
     this.runtime.savedAt = checkpoint.savedAt;
+  }
+
+  async control(paused: boolean, speed: number): Promise<void> {
+    if (!Number.isFinite(speed) || speed < 0.25 || speed > 8)
+      throw new Error("Speed must be between 0.25 and 8.");
+    while (this.stepping)
+      await new Promise<void>((resolve) => this.stepWaiters.push(resolve));
+    if (
+      this.stopped ||
+      !["running", "paused"].includes(this.runtime.status)
+    )
+      throw new Error("The island is busy or unavailable. Try again.");
+    this.stepping = true;
+    this.runtime.status = paused ? "paused" : "running";
+    this.runtime.speed = speed;
+    this.runtime.message = paused
+      ? "Time is paused."
+      : "Four independent minds. One shared world.";
+    try {
+      await this.save();
+    } catch (error) {
+      this.fail("Could not save the time controls.");
+      throw error;
+    } finally {
+      this.stepping = false;
+      for (const resolve of this.stepWaiters.splice(0)) resolve();
+    }
   }
 
   async step(now = Date.now()): Promise<void> {
@@ -136,8 +167,7 @@ export class SurvivalService {
           );
           // API error bodies can include request details; log only status and class.
           const e = completion.error as
-            | { name?: string; status?: number }
-            | undefined;
+            { name?: string; status?: number } | undefined;
           console.error("Survival provider failed", {
             name: e?.name ?? "InvalidResponse",
             status: e?.status,
@@ -150,13 +180,18 @@ export class SurvivalService {
         const bot = this.world.bots.find((b) => b.id === completion.botId)!;
         const decision = decisionSchema.parse(completion.result.decision);
         acceptDecision(this.world, bot, decision, completion.observation);
-        this.nextDecision.set(bot.id, now + 6_000);
+        this.nextDecision.set(bot.id, this.world.time + 6);
       }
       if (this.runtime.status !== "running") {
         await this.save();
         return;
       }
-      tickWorld(this.world, 0.25);
+      for (
+        let remaining = 0.25 * this.runtime.speed;
+        remaining > 0;
+        remaining -= 0.25
+      )
+        tickWorld(this.world, Math.min(0.25, remaining));
       for (const bot of this.world.bots) {
         if (bot.health <= 0 && this.requests.has(bot.id)) {
           this.requests.get(bot.id)?.abort();
@@ -167,36 +202,21 @@ export class SurvivalService {
       if (this.world.bots.every((bot) => bot.health <= 0)) {
         this.runtime.status = "ended";
         this.runtime.message =
-          "Both survivors have died. Their island and history are saved.";
+          "All survivors have died. Their island and history are saved.";
         await this.save();
         return;
       }
-      if (
-        this.runtime.decisions >= this.runtime.decisionLimit &&
-        !this.requests.size &&
-        this.world.bots.every((b) => !b.task)
-      ) {
-        this.runtime.status = "paused";
-        this.runtime.message = `Paused after ${this.runtime.decisions} decisions. Raise SURVIVAL_DECISION_LIMIT and restart to continue this island.`;
-        await this.save();
-        return;
-      }
-      const candidates = this.world.bots
-        .filter(
-          (b) =>
-            b.health > 0 &&
-            !b.task &&
-            !this.requests.has(b.id) &&
-            now >= (this.nextDecision.get(b.id) ?? 0),
-        )
-        .slice(
-          0,
-          Math.max(0, this.runtime.decisionLimit - this.runtime.decisions),
-        );
+      const candidates = this.world.bots.filter(
+        (b) =>
+          b.health > 0 &&
+          !b.task &&
+          !this.requests.has(b.id) &&
+          this.world.time >= (this.nextDecision.get(b.id) ?? 0),
+      );
       if (candidates.length) {
         this.runtime.decisions += candidates.length;
         for (const bot of candidates) bot.decisions++;
-        // Reserve the paid calls durably before dispatch, so a restart cannot reset the budget.
+        // Record attempted calls before dispatch.
         await this.save();
         if (this.stopped) return;
         for (const bot of candidates) {
@@ -244,8 +264,7 @@ export class SurvivalService {
       );
     } finally {
       this.stepping = false;
-      this.stepFinished?.();
-      this.stepFinished = null;
+      for (const resolve of this.stepWaiters.splice(0)) resolve();
     }
   }
 
@@ -267,7 +286,7 @@ export class SurvivalService {
     this.requests.clear();
     if (this.stepping)
       await new Promise<void>((resolve) => {
-        this.stepFinished = resolve;
+        this.stepWaiters.push(resolve);
       });
     if (this.runtime.savedAt) await this.save();
   }

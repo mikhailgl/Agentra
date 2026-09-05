@@ -8,5 +8,15 @@
     "provider": "openai",
     "model": "gpt-5.6-luna",
     "reasoningEffort": "low"
+  },
+  "reed": {
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "reasoningEffort": "low"
+  },
+  "flint": {
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "reasoningEffort": "low"
   }
 }

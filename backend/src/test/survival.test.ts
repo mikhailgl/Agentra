@@ -108,6 +108,7 @@ test("two simultaneous harvests cannot duplicate the last resource", () => {
 
 test("observations isolate memories and inventory; speech is local hearsay", () => {
   const world = createWorld();
+  world.bots = world.bots.slice(0, 2);
   world.bots[1].inventory.wood = 99;
   world.bots[1].memories.push({
     time: 0,
@@ -165,6 +166,7 @@ test("unseen targets, occupied construction, unaffordable crafting and malformed
 
 test("wall placement blocks navigation and sight; breaking returns only partial resources", () => {
   const world = createWorld();
+  world.bots = world.bots.slice(0, 2);
   world.bots[0].inventory.wood = 2;
   act(world, "moss", { type: "build", kind: "wall", x: 10, z: 10 });
   assert.equal(walkable(world, { x: 10, z: 10 }), false);
@@ -198,6 +200,8 @@ test("give transfers conserved inventory and eating consumes food", () => {
 const actors = (provider: SurvivalProvider | null): ActorControllers => ({
   moss: { model: provider?.model ?? "gpt-6-astra", provider },
   ember: { model: provider?.model ?? "gpt-6-astra", provider },
+  reed: { model: provider?.model ?? "gpt-5.6-luna", provider },
+  flint: { model: provider?.model ?? "gpt-5.6-luna", provider },
 });
 
 class MemoryStore implements SurvivalStore {
@@ -243,38 +247,42 @@ test("missing key pauses time and never substitutes a scripted provider", async 
   assert.equal(service.snapshot().runtime.decisions, 0);
 });
 
-test("independent calls reserve budget before dispatch and restore without replaying finished actions", async () => {
+test("four independent calls continue beyond 120 and pause freezes pending results and time", async () => {
   const store = new MemoryStore();
   const provider = new ControlledProvider();
-  const service = new SurvivalService(store, actors(provider), 2);
+  store.value = {
+    world: createWorld(),
+    decisions: 120,
+    paused: false,
+    speed: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    savedAt: new Date().toISOString(),
+  };
+  const service = new SurvivalService(store, actors(provider));
   await service.initialize();
   await service.step();
-  assert.equal(provider.calls.length, 2);
-  assert.notEqual(
-    provider.calls[0].observation.self.id,
-    provider.calls[1].observation.self.id,
-  );
-  assert.equal(store.value?.decisions, 2);
-  await service.step();
-  assert.equal(provider.calls.length, 2, "no duplicate in-flight requests");
-  provider.calls[0].resolve(
-    result({ type: "harvest", targetId: "tree-clearing" }),
-  );
-  provider.calls[1].resolve(
-    result({ type: "harvest", targetId: "rock-clearing" }),
-  );
+  assert.equal(provider.calls.length, 4);
+  assert.equal(store.value?.decisions, 124);
+  await service.control(true, 4);
+  const before = service.snapshot().world;
+  for (const call of provider.calls) call.resolve(result({ type: "rest" }));
   await flush();
-  for (let i = 0; i < 150; i++) await service.step();
-  assert.equal(service.snapshot().runtime.status, "paused");
-  assert.equal(service.snapshot().world.bots[0].inventory.wood, 2);
-  assert.equal(service.snapshot().runtime.inputTokens, 240);
-  const restored = new SurvivalService(store, actors(provider), 2);
+  await service.step();
+  assert.deepEqual(service.snapshot().world, before);
+  const restored = new SurvivalService(store, actors(provider));
   await restored.initialize();
-  await restored.step();
   assert.equal(restored.snapshot().runtime.status, "paused");
-  assert.equal(restored.snapshot().world.bots[0].inventory.wood, 2);
-  assert.equal(provider.calls.length, 2);
-  assert.ok(!JSON.stringify(restored.snapshot()).includes("memories"));
+  assert.equal(restored.snapshot().runtime.speed, 4);
+  await service.control(false, 4);
+  await service.step();
+  assert.equal(service.snapshot().world.time - before.time, 1);
+  assert.equal(service.snapshot().runtime.inputTokens, 480);
+  await service.control(false, 0.25);
+  const time = service.snapshot().world.time;
+  await service.step();
+  assert.equal(service.snapshot().world.time - time, 0.0625);
+  await assert.rejects(service.control(false, 99));
 });
 
 test("model failure pauses and aborts other calls; late results cannot mutate the world", async () => {
@@ -362,6 +370,8 @@ test("model configuration selects each actor independently and rejects silent en
   const config = {
     moss: { provider: "openai", model: "gpt-6-astra", reasoningEffort: "low" },
     ember: { provider: "anthropic", model: "test-claude" },
+    reed: { provider: "openai", model: "gpt-5.6-luna" },
+    flint: { provider: "openai", model: "gpt-5.6-luna" },
   };
   const controllers = createActorControllers(config, {
     OPENAI_API_KEY: "test-openai",
@@ -391,14 +401,11 @@ test("different model controllers act in one world and retain model attribution 
   const store = new MemoryStore();
   const mossProvider = new ControlledProvider();
   const emberProvider = new ControlledProvider();
-  const service = new SurvivalService(
-    store,
-    {
-      moss: { model: "model-one", provider: mossProvider },
-      ember: { model: "model-two", provider: emberProvider },
-    },
-    2,
-  );
+  const service = new SurvivalService(store, {
+    ...actors(emberProvider),
+    moss: { model: "model-one", provider: mossProvider },
+    ember: { model: "model-two", provider: emberProvider },
+  });
   await service.initialize();
   await service.step();
   assert.equal(mossProvider.calls[0].observation.self.id, "moss");
@@ -412,14 +419,11 @@ test("different model controllers act in one world and retain model attribution 
   await flush();
   await service.step();
   await store.save(service.checkpoint());
-  const restored = new SurvivalService(
-    store,
-    {
-      moss: { model: "model-three", provider: mossProvider },
-      ember: { model: "model-two", provider: emberProvider },
-    },
-    2,
-  );
+  const restored = new SurvivalService(store, {
+    ...actors(emberProvider),
+    moss: { model: "model-three", provider: mossProvider },
+    ember: { model: "model-two", provider: emberProvider },
+  });
   await restored.initialize();
   for (let i = 0; i < 100; i++) await restored.step();
   assert.equal(restored.snapshot().world.bots[0].model, "model-three");
@@ -448,6 +452,8 @@ test("local development checkpoint round-trips private memories, inventory and b
     });
     const checkpoint: SurvivalCheckpoint = {
       world,
+      paused: false,
+      speed: 1,
       decisions: 12,
       inputTokens: 100,
       outputTokens: 40,
@@ -558,4 +564,24 @@ test("shutdown waits for the checkpoint reservation and never dispatches after s
   await Promise.all([step, stop]);
   assert.equal(provider.calls.length, 0);
   assert.equal(writes, 2);
+});
+
+test("depleted renewables return only after their delay; stone stays depleted", () => {
+  const world = createWorld();
+  const bush = world.resources.find((r) => r.kind === "bush")!;
+  const tree = world.resources.find((r) => r.kind === "tree")!;
+  const rock = world.resources.find((r) => r.kind === "rock")!;
+  bush.remaining = tree.remaining = rock.remaining = 0;
+  bush.regrowAt = 900;
+  tree.regrowAt = 1800;
+  world.time = 899.5;
+  tickWorld(world, 0.25);
+  assert.equal(bush.remaining, 0);
+  tickWorld(world, 0.25);
+  assert.equal(bush.remaining, 4);
+  assert.equal(tree.remaining, 0);
+  world.time = 1799.75;
+  tickWorld(world, 0.25);
+  assert.equal(tree.remaining, 6);
+  assert.equal(rock.remaining, 0);
 });

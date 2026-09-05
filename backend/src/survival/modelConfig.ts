@@ -28,10 +28,15 @@ const actorSchema = z.discriminatedUnion("provider", [
     .strict(),
 ]);
 export const actorsSchema = z
-  .object({ moss: actorSchema, ember: actorSchema })
+  .object({
+    moss: actorSchema,
+    ember: actorSchema,
+    reed: actorSchema,
+    flint: actorSchema,
+  })
   .strict();
 export type ActorControllers = Record<
-  "moss" | "ember",
+  "moss" | "ember" | "reed" | "flint",
   { model: string; provider: SurvivalProvider | null }
 >;
 
@@ -41,7 +46,7 @@ export function createActorControllers(
 ): ActorControllers {
   const actors = actorsSchema.parse(config);
   const result = {} as ActorControllers;
-  for (const id of ["moss", "ember"] as const) {
+  for (const id of ["moss", "ember", "reed", "flint"] as const) {
     const actor = actors[id];
     const keyName =
       actor.provider === "openai"

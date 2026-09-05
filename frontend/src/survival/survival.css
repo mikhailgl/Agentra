@@ -731,3 +731,34 @@
 .survival-section-title button {
   width: auto;
 }
+
+.survival-time-controls,
+.survival-supplies {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 16px;
+  font-size: 13px;
+}
+.survival-time-controls button,
+.survival-time-controls select {
+  padding: 9px 14px;
+  border: 1px solid #d4d3c9;
+  border-radius: 8px;
+  background: #f6f5ee;
+  color: #30362e;
+}
+.survival-time-controls button:disabled,
+.survival-time-controls select:disabled {
+  opacity: 0.5;
+}
+.survival-time-controls label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.survival-time-controls small,
+.survival-supplies small {
+  color: #767b70;
+}

@@ -5,6 +5,7 @@ export type Resource = Position & {
   id: string;
   kind: "tree" | "rock" | "bush";
   remaining: number;
+  regrowAt: number | null;
 };
 export type Structure = Position & {
   id: string;
@@ -92,17 +93,12 @@ export type SurvivalSnapshot = {
   };
   runtime: {
     status:
-      | "starting"
-      | "running"
-      | "unconfigured"
-      | "paused"
-      | "ended"
-      | "error";
+      "starting" | "running" | "unconfigured" | "paused" | "ended" | "error";
     message: string;
     models: Record<string, string>;
     thinking: string[];
     decisions: number;
-    decisionLimit: number;
+    speed: number;
     inputTokens: number;
     outputTokens: number;
     lastLatencyMs: number | null;

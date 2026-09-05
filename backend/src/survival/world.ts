@@ -35,6 +35,24 @@ export function createWorld(): SurvivalWorld {
       x: 12,
       z: 10,
     },
+    {
+      id: "reed",
+      name: "Reed",
+      color: "#a6b978",
+      disposition:
+        "You are patient and cooperative. Your choices are your own.",
+      x: 9,
+      z: 12,
+    },
+    {
+      id: "flint",
+      name: "Flint",
+      color: "#b59bd4",
+      disposition:
+        "You are resourceful and ambitious. Your choices are your own.",
+      x: 12,
+      z: 12,
+    },
   ].map((bot) => ({
     ...bot,
     health: 100,
@@ -64,14 +82,36 @@ export function createWorld(): SurvivalWorld {
         x,
         z,
         kind,
+        regrowAt: null,
         remaining: kind === "tree" ? 6 : kind === "rock" ? 5 : 4,
       });
     }
   }
   resources.push(
-    { id: "bush-clearing", x: 10, z: 8, kind: "bush", remaining: 8 },
-    { id: "tree-clearing", x: 8, z: 9, kind: "tree", remaining: 10 },
-    { id: "rock-clearing", x: 13, z: 8, kind: "rock", remaining: 8 },
+    {
+      id: "bush-clearing",
+      x: 10,
+      z: 8,
+      kind: "bush",
+      remaining: 8,
+      regrowAt: null,
+    },
+    {
+      id: "tree-clearing",
+      x: 8,
+      z: 9,
+      kind: "tree",
+      remaining: 10,
+      regrowAt: null,
+    },
+    {
+      id: "rock-clearing",
+      x: 13,
+      z: 8,
+      kind: "rock",
+      remaining: 8,
+      regrowAt: null,
+    },
   );
   return {
     version: 1,
@@ -336,6 +376,8 @@ function execute(world: SurvivalWorld, bot: Survivor, action: Action) {
       bot.inventory.axe && item === "wood" ? 3 : 2,
     );
     r.remaining -= amount;
+    if (r.remaining === 0 && r.kind !== "rock")
+      r.regrowAt = world.time + (r.kind === "bush" ? 900 : 1800);
     bot.inventory[item] += amount;
     finish(world, bot, `Gathered ${amount} ${item} from ${r.id}.`);
     return;
@@ -494,6 +536,17 @@ export function tickWorld(world: SurvivalWorld, seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return;
   const dt = Math.min(seconds, 0.5);
   world.time += dt;
+  for (const resource of world.resources) {
+    if (
+      resource.regrowAt !== null &&
+      world.time >= resource.regrowAt &&
+      !world.structures.some((s) => same(s, resource)) &&
+      !world.bots.some((b) => b.health > 0 && distance(b, resource) < 0.85)
+    ) {
+      resource.remaining = resource.kind === "bush" ? 4 : 6;
+      resource.regrowAt = null;
+    }
+  }
   for (const bot of world.bots) {
     if (bot.health <= 0) {
       bot.task = null;

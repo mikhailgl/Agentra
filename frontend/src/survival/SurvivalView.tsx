@@ -47,6 +47,8 @@ export default function SurvivalView() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState("moss");
   const [reset, setReset] = useState(0);
+  const [controlling, setControlling] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
   const [journal, setJournal] = useState<"all" | "speech">("all");
   useEffect(() => {
     document.title = "The Island · BotArena";
@@ -82,6 +84,25 @@ export default function SurvivalView() {
       clearTimeout(timer);
     };
   }, []);
+
+  async function control(paused: boolean, speed: number) {
+    setControlling(true);
+    setControlError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/survival/control`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused, speed }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error();
+      setSnapshot(await response.json());
+    } catch {
+      setControlError("Could not change time. Please try again.");
+    } finally {
+      setControlling(false);
+    }
+  }
 
   const world = snapshot?.world;
   const runtime = snapshot?.runtime;
@@ -129,7 +150,7 @@ export default function SurvivalView() {
               <h1>
                 A world of their own<span>.</span>
               </h1>
-              <p>Two minds. No script. See what they make of it.</p>
+              <p>Four minds. No script. See what they make of it.</p>
             </div>
             <div className="survival-day">
               <span>{world && !isDaylight(world.time) ? "☾" : "☀"}</span>
@@ -141,6 +162,71 @@ export default function SurvivalView() {
                 {world && !isDaylight(world.time) ? "Night" : "Daylight"}
               </small>
             </div>
+          </div>
+          <div
+            className="survival-time-controls"
+            role="group"
+            aria-label="Simulation time"
+          >
+            <button
+              disabled={
+                controlling ||
+                !runtime ||
+                !["running", "paused"].includes(runtime.status)
+              }
+              onClick={() =>
+                void control(runtime?.status !== "paused", runtime?.speed ?? 1)
+              }
+            >
+              {runtime?.status === "paused" ? "▶ Play" : "Ⅱ Pause"}
+            </button>
+            <label>
+              Speed{" "}
+              <select
+                aria-label="Simulation speed"
+                value={runtime?.speed ?? 1}
+                disabled={
+                  controlling ||
+                  !runtime ||
+                  !["running", "paused"].includes(runtime.status)
+                }
+                onChange={(e) =>
+                  void control(
+                    runtime?.status === "paused",
+                    Number(e.target.value),
+                  )
+                }
+              >
+                {[0.25, 0.5, 1, 2, 4, 8].map((speed) => (
+                  <option key={speed} value={speed}>
+                    {speed}×
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small>Shared time · Model responses take real time</small>
+          </div>
+          {controlError && <p role="alert">{controlError}</p>}
+          <div className="survival-supplies" aria-label="Island resources">
+            {(
+              [
+                ["tree", "Wood"],
+                ["rock", "Stone"],
+                ["bush", "Berries"],
+              ] as const
+            ).map(([kind, label]) => (
+              <span key={kind}>
+                <strong>
+                  {world?.resources
+                    .filter((r) => r.kind === kind)
+                    .reduce((sum, r) => sum + r.remaining, 0) ?? 0}
+                </strong>{" "}
+                {label} available
+              </span>
+            ))}
+            <small>
+              Berries regrow in 1 day · Trees in 2 · Stone is finite
+            </small>
           </div>
           <div className="survival-viewport">
             {world ? (
@@ -193,8 +279,8 @@ export default function SurvivalView() {
           <div className="survival-facts">
             <div>
               <strong>
-                {world?.bots.filter((b) => b.health > 0).length ?? 2}
-                <span>/ 2</span>
+                {world?.bots.filter((b) => b.health > 0).length ?? 4}
+                <span>/ {world?.bots.length ?? 4}</span>
               </strong>
               <small>Survivors</small>
             </div>
@@ -273,7 +359,7 @@ export default function SurvivalView() {
         <aside className="survival-sidebar">
           <div className="survival-section-title">
             <h2>The inhabitants</h2>
-            <span>02</span>
+            <span>{world?.bots.length ?? 4}</span>
           </div>
           <p className="survival-sidebar-intro">
             Each survivor sees, remembers, and decides independently.
@@ -399,8 +485,7 @@ export default function SurvivalView() {
           <footer className="survival-runtime">
             <span>Independent actor models</span>
             <p>
-              {runtime?.decisions ?? 0} / {runtime?.decisionLimit ?? 120}{" "}
-              decisions ·{" "}
+              {runtime?.decisions ?? 0} decisions ·{" "}
               {(
                 (runtime?.inputTokens ?? 0) + (runtime?.outputTokens ?? 0)
               ).toLocaleString()}{" "}

@@ -18,6 +18,7 @@ import type { SponsorDropKind } from "../../frontend/src/game/simulation.js";
 import type { BetType, MatchLog } from "../../frontend/src/game/types.js";
 import { loadActorControllers } from "./survival/modelConfig.js";
 import { SurvivalRepository } from "./survival/repository.js";
+import { survivalRouter } from "./survival/routes.js";
 import { SurvivalService } from "./survival/service.js";
 
 // Do not hold the public arena behind a slow checkpoint read. The late-restore
@@ -34,7 +35,6 @@ const supabase = createSupabaseAdmin(config);
 const survival = new SurvivalService(
   new SurvivalRepository(supabase),
   loadActorControllers(),
-  Number(process.env.SURVIVAL_DECISION_LIMIT ?? 120),
 );
 void survival.initialize().then(() => survival.start());
 const repository = new GameStateRepository(supabase);
@@ -164,10 +164,7 @@ app.get("/health", (_request, response) => {
 });
 
 // Spectators can observe but cannot spend model credits or command survivors.
-app.get("/api/survival", (_request, response) => {
-  response.setHeader("Cache-Control", "no-store");
-  response.json(survival.snapshot());
-});
+app.use("/api/survival", survivalRouter(survival));
 
 app.get("/api/state", async (request, response, next) => {
   try {

@@ -4,6 +4,7 @@ import "dotenv/config";
 import { fileURLToPath } from "node:url";
 import { loadActorControllers } from "./modelConfig.js";
 import { LocalSurvivalRepository } from "./localRepository.js";
+import { survivalRouter } from "./routes.js";
 import { SurvivalService } from "./service.js";
 
 // A local survival-only entry point avoids running the competitive league while
@@ -11,10 +12,11 @@ import { SurvivalService } from "./service.js";
 const port = Number(process.env.PORT ?? 4000);
 const service = new SurvivalService(
   new LocalSurvivalRepository(
-    fileURLToPath(new URL("../../.local/survival-world.json", import.meta.url)),
+    fileURLToPath(
+      new URL("../../.local/survival-world-four.json", import.meta.url),
+    ),
   ),
   loadActorControllers(),
-  Number(process.env.SURVIVAL_DECISION_LIMIT ?? 120),
 );
 const app = express();
 app.use(
@@ -24,10 +26,7 @@ app.use(
     ).split(","),
   }),
 );
-app.get("/api/survival", (_request, response) => {
-  response.setHeader("Cache-Control", "no-store");
-  response.json(service.snapshot());
-});
+app.use("/api/survival", survivalRouter(service));
 app.get("/health", (_request, response) => {
   const runtime = service.snapshot().runtime;
   response.json({ ok: runtime.status !== "error", status: runtime.status });
